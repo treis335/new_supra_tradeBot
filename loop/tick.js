@@ -16,6 +16,7 @@ const renderArb = require('../tui/renderArb');
 const renderLog = require('../tui/renderlog');
 const { renderFooter, setRpcHealthy } = require('../tui/renderFooter');
 const { fetchWalletBalance } = require('../utils/walletBalance');
+const { writeBotStats } = require('../utils/statsWriter');
 
 let bestOpportunity = null;
 let currentOpps = [];
@@ -288,6 +289,12 @@ async function tick(boxes) {
     try { renderArb(opps, boxes); } catch (e) { logError('renderArb', e); }
     try { renderLog(opps, boxes); } catch (e) { logError('renderLog', e); }
     try { renderFooter(opps, Date.now() - t0, boxes); } catch (e) { logError('renderFooter', e); }
+
+    // A cada ~10s, grava o estado real para o dashboard-web (processo separado) ler.
+    const STATS_EVERY_N_TICKS = Math.max(1, Math.floor(10000 / (CONFIG.pollingMs || 2000)));
+    if (tickCounter % STATS_EVERY_N_TICKS === 0) {
+        writeBotStats({ walletBalances, opps, tickMs: Date.now() - t0 });
+    }
 
     try { boxes.screen.render(); } catch {}
 }

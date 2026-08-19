@@ -7,6 +7,10 @@ class ExecutorActions {
         this.configPath = path.join(__dirname, '../config/config.js');
         this.poolsPath = path.join(__dirname, '../spikeyPools.json');
         this.paramsPath = path.join(__dirname, '../.optimized_params.json');
+        // Nunca escreve diretamente no bot real -- qualquer mudança passa
+        // pela fila de propostas e só se torna real com aprovação humana
+        // no dashboard. Ver intelligence/proposalQueue.js e proposalApplier.js.
+        this.proposalQueue = require('../intelligence/proposalQueue');
         
         // Carregar parâmetros otimizados
         this.loadOptimizedParams();
@@ -167,32 +171,34 @@ class ExecutorActions {
         return actions;
     }
 
-    // 4. APLICAR AO CONFIG REAL
+    // 4. PROPOR AJUSTE AO CONFIG REAL (nunca escreve diretamente -- fica
+    // pendente até aprovação humana no dashboard)
     async applyToConfig() {
         try {
-            if (fs.existsSync(this.configPath)) {
-                let config = fs.readFileSync(this.configPath, 'utf8');
-                
-                // Substituir valores no arquivo de configuração
-                const replacements = {
-                    'minProfit': this.params.minProfit,
-                    'maxSlippage': this.params.maxSlippage,
-                    'tradeSize': this.params.tradeSize,
-                    'maxTradesPerMinute': this.params.maxTradesPerMinute,
-                    'riskLevel': `'${this.params.riskLevel}'`,
-                    'stopLoss': this.params.stopLoss,
-                    'takeProfit': this.params.takeProfit
-                };
-                
-                for (const [key, value] of Object.entries(replacements)) {
-                    const regex = new RegExp(`${key}:\\s*[^,\\n]+`, 'g');
-                    config = config.replace(regex, `${key}: ${value}`);
-                }
-                
-                fs.writeFileSync(this.configPath, config);
-                console.log('✅ Configuração atualizada com sucesso!');
-                return true;
+            // Mapeia os nomes internos (legado, nao batem certo com o config
+            // real) para os nomes REAIS usados em CONFIG.autoExecute. So os
+            // que tem equivalente real sao propostos -- os outros (tradeSize,
+            // riskLevel, takeProfit) nao existem no bot real e sao ignorados.
+            const realNameMap = {
+                minProfit: 'minProfitPct',
+                stopLoss: null,
+                maxTradesPerMinute: null,
+            };
+            const payload = {};
+            for (const [oldKey, realKey] of Object.entries(realNameMap)) {
+                if (!realKey) continue;
+                if (this.params[oldKey] !== undefined) payload[realKey] = this.params[oldKey];
             }
+            if (Object.keys(payload).length === 0) return false;
+
+            this.proposalQueue.addProposal({
+                type: 'config_adjust',
+                summary: `Ajuste sugerido pelo agente: ${Object.entries(payload).map(([k, v]) => `${k}=${v}`).join(', ')}`,
+                payload,
+                source: 'executorActions.otimizarEstrategia',
+            });
+            console.log('📋 Proposta de ajuste registada -- aguarda aprovação no dashboard.');
+            return true;
         } catch (e) {
             console.error('Erro ao aplicar configuração:', e);
             return false;
@@ -200,22 +206,21 @@ class ExecutorActions {
     }
 
     // 5. ADICIONAR NOVOS POOLS
-    async adicionarPool(endereco) {
-        try {
-            let pools = [];
-            if (fs.existsSync(this.poolsPath)) {
-                pools = JSON.parse(fs.readFileSync(this.poolsPath, 'utf8'));
-            }
-            
-            if (!pools.includes(endereco)) {
-                pools.push(endereco);
-                fs.writeFileSync(this.poolsPath, JSON.stringify(pools, null, 2));
-                return { success: true, message: `✅ Pool ${endereco} adicionado!` };
-            }
-            return { success: true, message: `ℹ️ Pool ${endereco} já existe` };
-        } catch (e) {
-            return { success: false, message: `❌ Erro: ${e.message}` };
+    async adicionarPool(endereco, tokenA, tokenB) {
+        // Nunca escreve diretamente em spikeyPools.json -- o formato real
+        // exige {address, tokenA, tokenB}, e uma string solta partia o
+        // ficheiro para todo o resto do bot que o lê (spikeyDiscovery,
+        // spikeyConfig). Fica como proposta pendente até aprovação.
+        if (!tokenA || !tokenB) {
+            return { success: false, message: '❌ tokenA e tokenB são obrigatórios (o endereço sozinho não chega -- corromperia o ficheiro).' };
         }
+        this.proposalQueue.addProposal({
+            type: 'add_pool',
+            summary: `Adicionar pool ${endereco} (${tokenA}/${tokenB})`,
+            payload: { address: endereco, tokenA, tokenB },
+            source: 'executorActions.adicionarPool',
+        });
+        return { success: true, message: `📋 Proposta registada para o pool ${endereco} -- aguarda aprovação no dashboard.` };
     }
 
     // 6. OTIMIZAR ESTRATÉGIA AUTOMATICAMENTE

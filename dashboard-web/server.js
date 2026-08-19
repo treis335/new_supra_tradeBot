@@ -6,6 +6,9 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 const { DeepSeekAPI } = require('../agent/deepseekClient');
+const { listProposals, getProposal, setStatus } = require('../intelligence/proposalQueue');
+const { applyProposal } = require('../intelligence/proposalApplier');
+const { readRecentHistory } = require('../intelligence/historyLogger');
 
 const app = express();
 const server = http.createServer(app);
@@ -29,15 +32,18 @@ const deepseek = new DeepSeekAPI();
 // ============================================
 
 let clients = [];
+// Sem dados reais ainda -- é isto que se via ANTES de o bot escrever
+// .bot_stats.json alguma vez. Não é um placeholder "bonito", é honesto:
+// diz claramente que não há bot ligado.
 let botStats = {
-    running: true,
-    balance: '174419 SUPRA',
-    pairs: 56,
-    totalTrades: 342,
-    profit: '12.4%',
-    successRate: '78.2%',
-    opportunities: 14,
-    cycles: 47
+    running: false,
+    balance: 'sem dados',
+    pairs: 0,
+    totalTrades: 0,
+    profit: 'sem dados',
+    successRate: 'sem dados',
+    opportunities: 0,
+    updatedAt: null,
 };
 
 let brainLogs = [];
@@ -48,13 +54,24 @@ let marketData = [];
 // FUNÇÕES DE COLETA DE DADOS
 // ============================================
 
+// Considera o bot "morto" se não escreveu stats há mais de 15s -- evita
+// mostrar um número real mas antigo como se fosse ao vivo.
+const STATS_STALE_MS = 15000;
+
 function loadBotStats() {
     try {
         if (fs.existsSync(botStatsFile)) {
             const data = JSON.parse(fs.readFileSync(botStatsFile, 'utf8'));
-            botStats = { ...botStats, ...data };
+            const isFresh = data.updatedAt && (Date.now() - data.updatedAt) < STATS_STALE_MS;
+            botStats = isFresh
+                ? { ...data, running: true }
+                : { ...data, running: false, balance: 'bot desligado', successRate: 'sem dados' };
+        } else {
+            botStats = { running: false, balance: 'sem dados', pairs: 0, totalTrades: 0, profit: 'sem dados', successRate: 'sem dados', opportunities: 0, updatedAt: null };
         }
-    } catch (e) {}
+    } catch (e) {
+        botStats = { running: false, balance: 'erro ao ler stats', pairs: 0, totalTrades: 0, profit: 'sem dados', successRate: 'sem dados', opportunities: 0, updatedAt: null };
+    }
 }
 
 function loadBrainLogs() {
@@ -66,47 +83,28 @@ function loadBrainLogs() {
     } catch (e) {}
 }
 
-function generateMarketData() {
-    const pairs = [
-        'SUPRA/CASH', 'SUPRA/DAWGZ', 'DAWGZ/DEXUSDC',
-        'JOSH/DEXUSDC', 'LOWCAPS/DEXUSDC', 'SPIKE/DEXUSDC',
-        'SUPRA/DEXUSDC', 'SUPRA/DRAGON', 'SUPRA/iSUPRA'
-    ];
-    
-    marketData = pairs.map(pair => {
-        const price = (Math.random() * 100 + 0.1);
-        const change = (Math.random() * 4 - 2);
-        return {
-            pair,
-            price: price.toFixed(4),
-            change: change.toFixed(2),
-            changePositive: change >= 0
-        };
-    });
-}
+// Mercado e trades reais, lidos do histórico persistente do bot
+// (data/history.jsonl) -- nunca inventados. Se não há bot a correr, listas
+// vêm vazias, honestamente, em vez de preenchidas com Math.random().
+function loadRealMarketAndTrades() {
+    const events = readRecentHistory({ sinceHoursAgo: 6, maxEvents: 100 });
 
-function generateTrades() {
-    const types = [
-        { icon: '◆', color: 'yellow', text: 'sc:78 SUPRA [DLyn]', profit: '+1.877%' },
-        { icon: '◆', color: 'yellow', text: 'sc:41 SUPRA [DLyn]', profit: '+0.647%' },
-        { icon: '◆', color: 'green', text: 'VENDEU 90.51 SUPRA (recebeu ~9318 LUCKY)', profit: '' },
-        { icon: '◆', color: 'green', text: 'COMPROU 1398 SUPRA (pagou ~0.7997 DEXUSDC)', profit: '' },
-        { icon: '◆', color: 'yellow', text: 'sc:68 SUPRA [DLyn]', profit: '+1.556%' },
-        { icon: '◆', color: 'green', text: 'VENDEU 27356 NANA (recebeu ~217.87 SUPRA)', profit: '' },
-        { icon: '◆', color: 'cyan', text: 'Oportunidade detectada', profit: '+0.847%' }
-    ];
-    
-    const now = Date.now();
-    trades = types.map((t, i) => {
-        const time = new Date(now - (types.length - i) * 30000);
-        return {
-            time: time.toTimeString().substring(0, 8),
-            icon: t.icon,
-            color: t.color,
-            text: t.text,
-            profit: t.profit
-        };
-    });
+    const tradeEvents = events.filter(e => e.type === 'trade_executed').slice(-15).reverse();
+    trades = tradeEvents.map(e => ({
+        time: new Date(e.ts).toTimeString().substring(0, 8),
+        icon: '◆',
+        color: e.success ? 'green' : 'red',
+        text: `${e.dex || '?'} ${e.path || ''}`.trim(),
+        profit: e.profitPct != null ? `${e.success ? '+' : ''}${e.profitPct.toFixed(3)}%` : '',
+    }));
+
+    const snapshotEvents = events.filter(e => e.type === 'opportunity_snapshot').slice(-9);
+    marketData = snapshotEvents.map(e => ({
+        pair: new Date(e.ts).toTimeString().substring(0, 8),
+        price: e.bestProfitPct != null ? e.bestProfitPct.toFixed(3) : '0',
+        change: e.count || 0,
+        changePositive: true,
+    }));
 }
 
 // ============================================
@@ -124,8 +122,7 @@ function broadcast(data) {
 function updateAllData() {
     loadBotStats();
     loadBrainLogs();
-    generateMarketData();
-    generateTrades();
+    loadRealMarketAndTrades();
     
     const payload = {
         type: 'update',
@@ -134,6 +131,7 @@ function updateAllData() {
             brainLogs: brainLogs.slice(-5),
             marketData,
             trades,
+            pendingProposals: listProposals('pending'),
             timestamp: new Date().toISOString()
         }
     };
@@ -157,13 +155,12 @@ app.get('/api/brain', (req, res) => {
 
 // API: Mercado
 app.get('/api/market', (req, res) => {
-    generateMarketData();
+    loadRealMarketAndTrades();
     res.json({ success: true, data: marketData });
 });
 
 // API: Trades
 app.get('/api/trades', (req, res) => {
-    generateTrades();
     res.json({ success: true, data: trades });
 });
 
@@ -171,8 +168,7 @@ app.get('/api/trades', (req, res) => {
 app.get('/api/dashboard', (req, res) => {
     loadBotStats();
     loadBrainLogs();
-    generateMarketData();
-    generateTrades();
+    loadRealMarketAndTrades();
     
     res.json({
         success: true,
@@ -184,6 +180,40 @@ app.get('/api/dashboard', (req, res) => {
             timestamp: new Date().toISOString()
         }
     });
+});
+
+// ── Propostas pendentes de aprovação humana ────────────────────────
+// Nenhuma proposta muda o bot sozinha. O agente só pode CRIAR propostas
+// (via intelligence/proposalQueue.js); só um humano, clicando aqui, é que
+// as transforma em mudança real (via intelligence/proposalApplier.js).
+app.get('/api/proposals', (req, res) => {
+    const status = req.query.status || null;
+    res.json({ success: true, data: listProposals(status) });
+});
+
+app.post('/api/proposals/:id/approve', (req, res) => {
+    const proposal = getProposal(req.params.id);
+    if (!proposal) return res.status(404).json({ success: false, error: 'proposta não encontrada' });
+    if (proposal.status !== 'pending') return res.status(400).json({ success: false, error: `proposta já está '${proposal.status}'` });
+
+    setStatus(req.params.id, 'approved');
+    try {
+        const result = applyProposal(req.params.id);
+        broadcast({ type: 'proposal_applied', data: { id: req.params.id, result } });
+        res.json({ success: true, data: result });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/proposals/:id/reject', (req, res) => {
+    const proposal = getProposal(req.params.id);
+    if (!proposal) return res.status(404).json({ success: false, error: 'proposta não encontrada' });
+    if (proposal.status !== 'pending') return res.status(400).json({ success: false, error: `proposta já está '${proposal.status}'` });
+
+    setStatus(req.params.id, 'rejected', { reason: req.body?.reason || null });
+    broadcast({ type: 'proposal_rejected', data: { id: req.params.id } });
+    res.json({ success: true });
 });
 
 // API: Comandos
