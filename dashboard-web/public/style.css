@@ -1,0 +1,529 @@
+/* dashboard-web/public/style.css */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --bg-primary: #0a0e1a;
+    --bg-card: #111827;
+    --bg-card-hover: #1a2234;
+    --border-color: #1f2937;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --accent-cyan: #06b6d4;
+    --accent-green: #10b981;
+    --accent-yellow: #f59e0b;
+    --accent-magenta: #8b5cf6;
+    --accent-red: #ef4444;
+}
+
+body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+/* ============================================
+   HEADER
+   ============================================ */
+.header {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px 30px;
+    margin-bottom: 24px;
+}
+
+.header-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.logo {
+    font-size: 2.5rem;
+    margin-right: 16px;
+}
+
+.title h1 {
+    font-size: 1.8rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #06b6d4, #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.status-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-primary);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    border: 1px solid var(--border-color);
+}
+
+.dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.dot.connected {
+    background: var(--accent-green);
+    animation: pulse 2s infinite;
+}
+
+.dot.disconnected {
+    background: var(--accent-red);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ============================================
+   GRID DO DASHBOARD
+   ============================================ */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+/* ============================================
+   CARDS
+   ============================================ */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.card:hover {
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 30px rgba(6, 182, 212, 0.05);
+}
+
+.card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.card-header h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    flex: 1;
+}
+
+.card-header .badge {
+    font-size: 0.7rem;
+    background: var(--bg-primary);
+    padding: 4px 10px;
+    border-radius: 12px;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.card-body {
+    padding: 16px 20px;
+}
+
+/* ============================================
+   STATUS CARD
+   ============================================ */
+.status-card {
+    grid-column: span 1;
+}
+
+.status-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.status-item:last-child {
+    border-bottom: none;
+}
+
+.status-item .label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.status-item .value {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.status-item .value.profit {
+    color: var(--accent-green);
+}
+
+/* ============================================
+   BRAIN CARD
+   ============================================ */
+.brain-card {
+    grid-column: span 1;
+}
+
+.brain-log {
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+.brain-log::-webkit-scrollbar {
+    width: 4px;
+}
+
+.brain-log::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+
+.brain-log::-webkit-scrollbar-thumb {
+    background: var(--accent-magenta);
+    border-radius: 4px;
+}
+
+.brain-thought {
+    display: flex;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    font-size: 0.85rem;
+}
+
+.brain-thought:last-child {
+    border-bottom: none;
+}
+
+.thought-time {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    min-width: 45px;
+}
+
+.thought-text {
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+/* ============================================
+   MARKET CARD
+   ============================================ */
+.market-card {
+    grid-column: span 1;
+}
+
+.market-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    font-size: 0.85rem;
+}
+
+.market-item:last-child {
+    border-bottom: none;
+}
+
+.market-item .pair {
+    font-weight: 500;
+}
+
+.market-item .price {
+    color: var(--text-secondary);
+}
+
+.market-item .change.positive {
+    color: var(--accent-green);
+}
+
+.market-item .change.negative {
+    color: var(--accent-red);
+}
+
+/* ============================================
+   TRADES CARD
+   ============================================ */
+.trades-card {
+    grid-column: span 2;
+}
+
+.trades-log {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.trades-log::-webkit-scrollbar {
+    width: 4px;
+}
+
+.trades-log::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+
+.trades-log::-webkit-scrollbar-thumb {
+    background: var(--accent-yellow);
+    border-radius: 4px;
+}
+
+.trade-item {
+    display: flex;
+    gap: 12px;
+    padding: 4px 0;
+    font-size: 0.85rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    font-family: 'Courier New', monospace;
+}
+
+.trade-item:last-child {
+    border-bottom: none;
+}
+
+.trade-item .trade-time {
+    color: var(--text-secondary);
+    min-width: 75px;
+}
+
+.trade-item .trade-icon {
+    min-width: 20px;
+}
+
+.trade-item.yellow .trade-icon { color: var(--accent-yellow); }
+.trade-item.green .trade-icon { color: var(--accent-green); }
+.trade-item.cyan .trade-icon { color: var(--accent-cyan); }
+
+/* ============================================
+   METRICS CARD
+   ============================================ */
+.metrics-card {
+    grid-column: span 1;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.metric {
+    text-align: center;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+}
+
+.metric-label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.metric-value {
+    display: block;
+    font-size: 1.3rem;
+    font-weight: 700;
+}
+
+/* ============================================
+   CONSOLE CARD
+   ============================================ */
+.console-card {
+    grid-column: span 4;
+}
+
+.console-body {
+    padding: 12px 20px;
+}
+
+.console-output {
+    background: var(--bg-primary);
+    border-radius: 8px;
+    padding: 12px;
+    min-height: 120px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    margin-bottom: 12px;
+    border: 1px solid var(--border-color);
+}
+
+.console-output::-webkit-scrollbar {
+    width: 4px;
+}
+
+.console-output::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+
+.console-output::-webkit-scrollbar-thumb {
+    background: var(--accent-cyan);
+    border-radius: 4px;
+}
+
+.console-line {
+    padding: 2px 0;
+    line-height: 1.6;
+}
+
+.console-line.user {
+    color: var(--accent-yellow);
+}
+
+.console-line.bot {
+    color: var(--accent-cyan);
+}
+
+.console-line.system {
+    color: var(--text-secondary);
+}
+
+.console-line.error {
+    color: var(--accent-red);
+}
+
+.console-input {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.console-input input {
+    flex: 1;
+    padding: 10px 16px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    outline: none;
+    transition: all 0.3s ease;
+}
+
+.console-input input:focus {
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.1);
+}
+
+.console-input input::placeholder {
+    color: var(--text-secondary);
+}
+
+.console-input button {
+    padding: 10px 24px;
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-magenta));
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.console-input button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(6, 182, 212, 0.3);
+}
+
+.console-hints {
+    display: flex;
+    gap: 20px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* ============================================
+   FOOTER
+   ============================================ */
+.footer {
+    display: flex;
+    justify-content: space-between;
+    padding: 16px 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-top: 20px;
+}
+
+.footer a {
+    color: var(--accent-cyan);
+    text-decoration: none;
+}
+
+.footer a:hover {
+    text-decoration: underline;
+}
+
+/* ============================================
+   RESPONSIVIDADE
+   ============================================ */
+@media (max-width: 1400px) {
+    .dashboard-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    .trades-card { grid-column: span 2; }
+    .console-card { grid-column: span 3; }
+}
+
+@media (max-width: 1024px) {
+    .dashboard-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .trades-card { grid-column: span 2; }
+    .console-card { grid-column: span 2; }
+}
+
+@media (max-width: 768px) {
+    .header-content {
+        flex-direction: column;
+        gap: 12px;
+        text-align: center;
+    }
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+    .trades-card, .console-card {
+        grid-column: span 1;
+    }
+    .metrics-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+    .console-input {
+        flex-direction: column;
+    }
+    .console-hints {
+        flex-direction: column;
+        gap: 4px;
+    }
+}

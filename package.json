@@ -1,20 +1,53 @@
 {
-  "name": "src",
+  "name": "new_supra_tradeBot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Bot de arbitragem e trading na blockchain Supra com agente DeepSeek e cérebro autónomo",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node start-all.js",
+    "start:win": "start.bat",
+    "start:mac": "./start.sh",
+    "dev": "nodemon index.js",
+    "agent": "node agent/standalone.js",
+    "agent:dev": "nodemon agent/standalone.js",
+    "brain": "node agent/autonomous.js",
+    "brain:dev": "nodemon agent/autonomous.js",
+    "executor": "node agent/executiveInterface.js",
+    "dashboard": "node dashboard/index.js",
+    "dashboard:dev": "nodemon dashboard/index.js",
+    "web": "node dashboard-web/server.js",
+    "web:dev": "nodemon dashboard-web/server.js"
   },
-  "keywords": [],
+  "keywords": [
+    "supra",
+    "arbitrage",
+    "trading",
+    "deepseek",
+    "blockchain",
+    "autonomous",
+    "ai",
+    "bot",
+    "dashboard",
+    "web"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@aptos-labs/ts-sdk": "^1.30.0",
     "axios": "^1.16.1",
     "blessed": "^0.1.81",
+    "blessed-contrib": "^4.11.0",
+    "cors": "^2.8.5",
     "dotenv": "^17.4.2",
+    "express": "^4.18.2",
+    "readline": "^1.3.0",
     "supra-l1-sdk": "^5.0.2",
-    "tweetnacl": "^1.0.3"
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.0.0"
   }
 }
