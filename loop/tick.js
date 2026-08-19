@@ -5,6 +5,8 @@ const priceEngineV3 = require('../dexes/dexlyn/dexlynEngineV3');
 const spikeyEngine = require('../dexes/spikey/spikeyEngine');
 const { SPIKEY_CONFIG } = require('../dexes/spikey/spikeyConfig');
 const { discoverNewPools } = require('../dexes/spikey/spikeyDiscovery');
+const { logEvent } = require('../intelligence/historyLogger');
+const { analyzePerformance } = require('../intelligence/deepseekAnalyst');
 const graphEngine = require('../engine/graphEngine');
 const { arbDetector } = require('../detector/arbDetector');
 const { logError } = require('../utils/logError');
@@ -104,11 +106,23 @@ async function maybeAutoExecute(opps, balances, boxes) {
                 log(`{green-fg}✅ Sucesso! Tx: ${res.txHash.slice(0,10)}...{/}`);
                 availableSUPRA -= opp.optimalAmount;
                 executed++;
+                logEvent('trade_executed', {
+                    dex: executor.label, path: pathLabel,
+                    profitPct: opp.result.profitPct, profitAbs: opp.result.profitAbs,
+                    amount: opp.optimalAmount, txHash: res.txHash, success: true,
+                });
             } else {
                 log(`{red-fg}❌ Falhou: ${pathLabel}{/}`);
+                logEvent('trade_executed', {
+                    dex: executor.label, path: pathLabel,
+                    profitPct: opp.result.profitPct, amount: opp.optimalAmount, success: false,
+                });
             }
         } catch (e) {
             log(`{red-fg}❌ Erro: ${e.message}{/}`);
+            logEvent('trade_executed', {
+                dex: executor.label, path: pathLabel, success: false, error: e.message,
+            });
         }
     }
 
@@ -132,7 +146,22 @@ async function tick(boxes) {
                 boxes.footerBox.setContent(msg);
                 boxes.screen.render();
             }
+        }).then(res => {
+            if (res && res.added > 0) logEvent('pools_discovered', { count: res.added });
         }).catch(e => logError('discoverNewPools', e));
+    }
+
+    // Analista de performance (DeepSeek): corre a cada ~2h (nao a cada tick -- e uma
+    // analise de tendencias, nao uma decisao de trade individual). Ajusta parametros
+    // dentro de limites seguros com base no que realmente performou.
+    const ANALYST_EVERY_N_TICKS = Math.floor((2 * 3600 * 1000) / (CONFIG.pollingMs || 2000));
+    if (tickCounter % ANALYST_EVERY_N_TICKS === 0) {
+        analyzePerformance((msg) => {
+            if (boxes?.footerBox) {
+                boxes.footerBox.setContent(msg);
+                boxes.screen.render();
+            }
+        }).catch(e => logError('analyzePerformance', e));
     }
 
     const tasks = [];
@@ -187,6 +216,7 @@ async function tick(boxes) {
     // ═══ 3. Spikey ═══
     if (SPIKEY_CONFIG && SPIKEY_CONFIG.pools && SPIKEY_CONFIG.pools.length > 0) {
         for (const pool of SPIKEY_CONFIG.pools) {
+            if (pool.active === false) continue; // pool em quarentena pelo analista -- nao negoceia
             tasks.push(limit(() =>
                 taskWithTimeout(
                     spikeyEngine.fetchPairState(pool.address, pool.tokenA, pool.tokenB),
@@ -230,6 +260,19 @@ async function tick(boxes) {
         opps = [];
         bestOpportunity = null;
         currentOpps = [];
+    }
+
+    // Snapshot periodico das oportunidades vistas (nao a cada tick -- ficheiro cresceria
+    // demasiado rapido). Serve de contexto para o analista perceber o "estado geral do
+    // mercado" ao longo do tempo, nao so as trades que executamos.
+    const SNAPSHOT_EVERY_N_TICKS = 15; // ~30s
+    if (tickCounter % SNAPSHOT_EVERY_N_TICKS === 0 && opps.length > 0) {
+        logEvent('opportunity_snapshot', {
+            count: opps.length,
+            bestProfitPct: opps[0]?.result.profitPct || 0,
+            bestScore: opps[0]?.score || 0,
+            crossDexCount: opps.filter(o => new Set(o.result.steps.map(s => s.dex)).size > 1).length,
+        });
     }
 
     const walletBalances = process.env.SENDER_ADDRESS

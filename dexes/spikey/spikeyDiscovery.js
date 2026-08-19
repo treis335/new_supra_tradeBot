@@ -61,7 +61,7 @@ async function discoverNewPools(log = () => {}) {
 
                 const [tokenA, tokenB] = await Promise.all([getTokenInfo(m0), getTokenInfo(m1)]);
 
-                newPools.push({
+                const poolEntry = {
                     address,
                     tokenA: tokenA.symbol,
                     tokenB: tokenB.symbol,
@@ -69,9 +69,27 @@ async function discoverNewPools(log = () => {}) {
                     decimalsB: tokenB.decimals,
                     discovered: true,
                     discoveredAt: new Date().toISOString(),
-                });
+                    active: true, // pode ser marcado false pelo analista se achar suspeito
+                };
 
-                log(`{green-fg}  ✅ Novo pool: ${tokenA.symbol}/${tokenB.symbol} (${address.slice(0, 8)}...){/}`);
+                // Avaliacao de risco pelo analista (DeepSeek), se configurado. Se nao
+                // houver API key, aceita por defeito -- nao bloqueia o funcionamento
+                // do bot so por a IA nao estar ligada.
+                try {
+                    const { assessNewPool } = require('../../intelligence/deepseekAnalyst');
+                    const assessment = await assessNewPool(poolEntry, log);
+                    if (assessment && assessment.safe === false) {
+                        poolEntry.active = false;
+                        poolEntry.quarantineReason = assessment.reason;
+                    }
+                } catch (e) {
+                    logError('spikeyDiscovery assessNewPool', e);
+                }
+
+                newPools.push(poolEntry);
+
+                const statusIcon = poolEntry.active ? '✅' : '🔶 (quarentena)';
+                log(`{green-fg}  ${statusIcon} Novo pool: ${tokenA.symbol}/${tokenB.symbol} (${address.slice(0, 8)}...){/}`);
             } catch (e) {
                 logError(`spikeyDiscovery pool ${address}`, e);
             }
