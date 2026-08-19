@@ -9,6 +9,7 @@ const graphEngine = require('../engine/graphEngine');
 const { arbDetector } = require('../detector/arbDetector');
 const { logError } = require('../utils/logError');
 const renderPrices = require('../tui/renderPrices');
+const { trackActivity } = require('../tracker/tradeActivityTracker');
 const renderArb = require('../tui/renderArb');
 const renderLog = require('../tui/renderlog');
 const { renderFooter, setRpcHealthy } = require('../tui/renderFooter');
@@ -240,6 +241,7 @@ async function tick(boxes) {
     }
 
     try { renderPrices(pairStates, boxes, walletBalances); } catch (e) { logError('renderPrices', e); }
+    try { trackActivity(pairStates); } catch (e) { logError('trackActivity', e); }
     try { renderArb(opps, boxes); } catch (e) { logError('renderArb', e); }
     try { renderLog(opps, boxes); } catch (e) { logError('renderLog', e); }
     try { renderFooter(opps, Date.now() - t0, boxes); } catch (e) { logError('renderFooter', e); }

@@ -48,7 +48,7 @@ function initScreen() {
     scrollbar: { ch: '│', style: { fg: 'blue' } },
     mouse: true, keys: true,
     border: { type: 'line' },
-    label: ' {bold}{blue-fg}LOG DE ARBS{/}{/} ',
+    label: ' {bold}{blue-fg}LOG DE ARBS + ATIVIDADE{/}{/} ',
     style: { border: { fg: 'blue' } },
   });
 
@@ -180,21 +180,26 @@ function initScreen() {
       txOverlay.log(`{grey-fg}Montante: ${opp.optimalAmount.toFixed(2)} SUPRA{/}`);
 
       try {
-        // Escolhe o executor baseado na composição da rota
+        // Escolhe o executor baseado na composição da rota (mesma logica do auto-execute em loop/tick.js)
         const dexesInRoute = new Set(opp.cycle.edges.map(e => e.pair.dex));
+        const onlySpikey = [...dexesInRoute].every(d => d === 'SPIKEY');
+        const onlyDexlyn = [...dexesInRoute].every(d => d === 'DEXLYN' || d === 'DEXLYN_V3');
+        const isCrossDex = [...dexesInRoute].every(d => d === 'DEXLYN' || d === 'SPIKEY') && dexesInRoute.size > 1;
+
         let res;
-        if (dexesInRoute.size === 1 && dexesInRoute.has('SPIKEY')) {
-          // Rota puramente Spikey
-          const { executeSpikeyArbitrage } = require('../dexes/spikey/spikeyExecute');
-          res = await executeSpikeyArbitrage(opp, (msg) => txOverlay.log(msg));
-        } else if (dexesInRoute.size === 1 && (dexesInRoute.has('DEXLYN') || dexesInRoute.has('DEXLYN_V3'))) {
-          // Rota puramente Dexlyn
+        if (onlySpikey) {
+          const { executeSpikeySwap } = require('../dexes/spikey/spikeyExecute');
+          res = await executeSpikeySwap(opp, (msg) => txOverlay.log(msg));
+        } else if (onlyDexlyn) {
           const { executeArbitrage } = require('../dexes/dexlyn/dexlynExecute');
           res = await executeArbitrage(opp, (msg) => txOverlay.log(msg));
+        } else if (isCrossDex) {
+          txOverlay.log('{yellow-fg}⚠️ Rota cross-DEX: legs separadas, NAO atomico.{/}');
+          const { executeCrossDexArbitrage } = require('../executor/crossDexExecute');
+          res = await executeCrossDexArbitrage(opp, (msg) => txOverlay.log(msg));
         } else {
-          // Rota cross‑DEX (precisa do script Move específico)
-          const { executeCrossArbitrage } = require('../executor/executeCrossArb');
-          res = await executeCrossArbitrage(opp, (msg) => txOverlay.log(msg));
+          txOverlay.log('{red-fg}❌ Combinação de DEXs não suportada nesta rota.{/}');
+          res = null;
         }
 
         if (res && res.txHash) {
