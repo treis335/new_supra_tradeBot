@@ -1,7 +1,7 @@
 // config/config.js — Dexlyn + Spikey cross‑DEX (tokens completos)
 const CONFIG = {
   rpc: 'https://rpc-mainnet.supra.com',
-  pollingMs: 3500,
+  pollingMs: 2000, // era 3500 -- mais scans/min = mais janelas de oportunidade capturadas antes da concorrencia
   emaAlpha: 0.35,
   tickHistory: 12,
   minProfitPct: 0.10,
@@ -10,15 +10,19 @@ const CONFIG = {
   arbLogMax: 8,
   viewTimeout: 12000,
   viewRetries: 3,
-  maxConcurrent: 4,
+  maxConcurrent: 6, // era 4 -- mais pares agora (Atmos), callView.js ja tem backoff automatico p/ 429
 
   autoExecute: {
     enabled: true,
     minProfitPct: 0.35,
     minScore: 25,
     gasReserveSUPRA: 0.09,
-    cooldownMs: 5000,
+    cooldownMs: 1500,
+    maxTradesPerTick: 3,
     maxConsecutiveFails: 3,
+    // Cross-DEX (Dexlyn+Spikey) nao e atomico -- exige margem de lucro maior
+    // para absorver o risco de o preco se mover entre as legs separadas.
+    crossDexMinProfitPct: 1.0,
   },
 
   v3Pools: {
