@@ -10,6 +10,8 @@ const { CONFIG }         = require('./config/config');
 const { logError }       = require('./utils/logError');
 const { getSupraClient } = require('./utils/supraClient');
 
+const { startDiscoveryLoop } = require('./discovery');
+
 (async () => {
   process.on('uncaughtException',  (err)    => logError('uncaughtException', err));
   process.on('unhandledRejection', (reason) => logError('unhandledRejection', reason));
@@ -28,6 +30,8 @@ const { getSupraClient } = require('./utils/supraClient');
   }
 
   const boxes = initScreen();
+
+  startDiscoveryLoop(25000); 
 
   function shutdown() {
     try { boxes.screen.program.showCursor(); boxes.screen.destroy(); } catch {}

@@ -1,28 +1,52 @@
-// config/config.js — Dexlyn + Spikey cross‑DEX (tokens completos)
+// config/config.js — Dexlyn + Spikey cross-DEX (tokens completos)
+// CORRIGIDO: foco em arb triangular, anti-falsos-positivos, tick mais estável
+
 const CONFIG = {
   rpc: 'https://rpc-mainnet.supra.com',
-  pollingMs: 2000, // era 3500 -- mais scans/min = mais janelas de oportunidade capturadas antes da concorrencia
-  emaAlpha: 0.35,
-  tickHistory: 12,
-  minProfitPct: 0.10,
-  optimalSearch: { min: 10, max: 10000, iterations: 20 },
-  scoreWeights: { profit: 0.60, liquidity: 0.25, trend: 0.15 },
-  arbLogMax: 8,
+
+  // ─── Loop / RPC ───
+  // 3000ms + maxConcurrent 4 = menos pressão no RPC e ticks mais estáveis
+  pollingMs: 3000,
+  maxConcurrent: 4,
   viewTimeout: 12000,
   viewRetries: 3,
-  maxConcurrent: 6, // era 4 -- mais pares agora (Atmos), callView.js ja tem backoff automatico p/ 429
 
+  // ─── Detecção de oportunidades ───
+  // minProfitPct baixo para o detector VER triangulares pequenos;
+  // a execução automática usa o threshold mais alto em autoExecute.
+  minProfitPct: 0.12,
+  emaAlpha: 0.35,
+  tickHistory: 12,
+  arbLogMax: 8,
+
+  // Tamanho ótimo da trade (ternary search)
+  optimalSearch: { min: 10, max: 10000, iterations: 20 },
+
+  // Scoring: lucro manda, liquidez protege, trend ajuda
+  scoreWeights: { profit: 0.55, liquidity: 0.30, trend: 0.15 },
+
+  // ─── Auto-execução ───
   autoExecute: {
     enabled: true,
-    minProfitPct: 0.35,
-    minScore: 25,
-    gasReserveSUPRA: 0.09,
-    cooldownMs: 1500,
-    maxTradesPerTick: 3,
+    // Só executa se o lucro estimado for realista e suficiente
+    minProfitPct: 0.30,          // triangular limpo
+    minScore: 22,
+    gasReserveSUPRA: 0.15,       // reserva um pouco maior (carteira grande)
+    cooldownMs: 2000,            // evita spam de txs
+    maxTradesPerTick: 2,
     maxConsecutiveFails: 3,
-    // Cross-DEX (Dexlyn+Spikey) nao e atomico -- exige margem de lucro maior
-    // para absorver o risco de o preco se mover entre as legs separadas.
-    crossDexMinProfitPct: 1.0,
+    // Cross-DEX NÃO é atómico — exige margem extra
+    crossDexMinProfitPct: 2.0,
+    // Teto de segurança: % acima disto é tratado como bug de simulação
+    maxRealisticProfitPct: 50,
+  },
+
+  // ─── Preferência de rotas (usado pelo Hunter) ───
+  routePreference: {
+    preferTriangular: true,      // 3 hops = prioridade
+    maxHops: 4,
+    minHops: 2,
+    triangularBoost: 1.12,       // +12% no score de ciclos de 3 hops
   },
 
   v3Pools: {
@@ -39,98 +63,289 @@ const CONFIG = {
       moduleAddress: '0xdc694898dff98a1b0447e0992d0413e123ea80da1021d464a4fbaf0265870d8',
       curveTypes: {
         uncorrelated: 'curves::Uncorrelated',
-        stable:       'curves::Stable',
+        stable: 'curves::Stable',
       },
+      // Pares pensados para triangular: SUPRA ↔ token ↔ DEXUSDC ↔ SUPRA
       pairs: [
-        ['SUPRA',    'DEXUSDC',   'uncorrelated'],
-        ['LUCKY',    'SUPRA',     'uncorrelated'],
-        ['DAWGZ',    'SUPRA',     'uncorrelated'],
-        ['ROBBIE',   'SUPRA',     'uncorrelated'],
-        ['JOSH',     'SUPRA',     'uncorrelated'],
-        ['SPIKE',    'SUPRA',     'uncorrelated'],
-        ['LEO',      'SUPRA',     'uncorrelated'],
-        ['MUMMY',    'SUPRA',     'uncorrelated'],
-        ['MCB',      'SUPRA',     'uncorrelated'],
-        ['PECKY',    'SUPRA',     'uncorrelated'],
-        ['CASH',     'SUPRA',     'uncorrelated'],
-        ['REPANDA',  'SUPRA',     'uncorrelated'],
-        ['LOWCAPS',  'SUPRA',     'uncorrelated'],
-        ['BABYJOSH', 'SUPRA',     'uncorrelated'],
-        ['TSUPRA',   'SUPRA',     'uncorrelated'],
-        ['WABBIT',   'SUPRA',     'uncorrelated'],
-        ['NANA',     'SUPRA',     'uncorrelated'],
-        ['LUCKY',    'DEXUSDC',   'uncorrelated'],
-        ['DAWGZ',    'DEXUSDC',   'uncorrelated'],
-        ['CASH',     'DEXUSDC',   'uncorrelated'],
-        ['JOSH',     'DEXUSDC',   'uncorrelated'],
-        ['OG',       'SUPRA',     'uncorrelated'],
-        ['SBC',      'SUPRA',     'uncorrelated'],
-        ['MUMMY',    'DEXUSDC',   'uncorrelated'],
-        ['SUPDOG',   'SUPRA',     'uncorrelated'],
-        ['PUMP',     'SUPRA',     'uncorrelated'],
-        ['SHILLBILL','SUPRA',     'uncorrelated'],
-        ['FLP',      'SUPRA',     'uncorrelated'],
-        ['SUPD',     'SUPRA',     'uncorrelated'],
-        ['PECKY',    'DEXUSDC',   'uncorrelated'],
-        ['SPIKE',    'DEXUSDC',   'uncorrelated'],
-        ['MCB',      'JOSH',      'uncorrelated'],
-        ['LOWCAPS',  'DEXUSDC',   'uncorrelated'],
+        // Base SUPRA
+        ['SUPRA', 'DEXUSDC', 'uncorrelated'],
+        ['LUCKY', 'SUPRA', 'uncorrelated'],
+        ['DAWGZ', 'SUPRA', 'uncorrelated'],
+        ['ROBBIE', 'SUPRA', 'uncorrelated'],
+        ['JOSH', 'SUPRA', 'uncorrelated'],
+        ['SPIKE', 'SUPRA', 'uncorrelated'],
+        ['LEO', 'SUPRA', 'uncorrelated'],
+        ['MUMMY', 'SUPRA', 'uncorrelated'],
+        ['MCB', 'SUPRA', 'uncorrelated'],
+        ['PECKY', 'SUPRA', 'uncorrelated'],
+        ['CASH', 'SUPRA', 'uncorrelated'],
+        ['REPANDA', 'SUPRA', 'uncorrelated'],
+        ['LOWCAPS', 'SUPRA', 'uncorrelated'],
+        ['BABYJOSH', 'SUPRA', 'uncorrelated'],
+        ['TSUPRA', 'SUPRA', 'uncorrelated'],
+        ['WABBIT', 'SUPRA', 'uncorrelated'],
+        ['NANA', 'SUPRA', 'uncorrelated'],
+        ['OG', 'SUPRA', 'uncorrelated'],
+        ['SBC', 'SUPRA', 'uncorrelated'],
+        ['SUPDOG', 'SUPRA', 'uncorrelated'],
+        ['PUMP', 'SUPRA', 'uncorrelated'],
+        ['SHILLBILL', 'SUPRA', 'uncorrelated'],
+        ['FLP', 'SUPRA', 'uncorrelated'],
+        ['SUPD', 'SUPRA', 'uncorrelated'],
+
+        // Base DEXUSDC (fecha triângulos SUPRA → X → DEXUSDC → SUPRA)
+        ['LUCKY', 'DEXUSDC', 'uncorrelated'],
+        ['DAWGZ', 'DEXUSDC', 'uncorrelated'],
+        ['CASH', 'DEXUSDC', 'uncorrelated'],
+        ['JOSH', 'DEXUSDC', 'uncorrelated'],
+        ['MUMMY', 'DEXUSDC', 'uncorrelated'],
+        ['PECKY', 'DEXUSDC', 'uncorrelated'],
+        ['SPIKE', 'DEXUSDC', 'uncorrelated'],
+        ['LOWCAPS', 'DEXUSDC', 'uncorrelated'],
+
+        // Cross-token extra
+        ['MCB', 'JOSH', 'uncorrelated'],
       ],
     },
   },
 
   tokens: {
-    // ═══ Tokens originais da Dexlyn ═══
-    SUPRA:    { type: '0x1::supra_coin::SupraCoin', decimals: 1e8, symbol: 'SUPRA' },
-    DEXUSDC:  { type: '0x8f7d16ade319b0fce368ca6cdb98589c4527ce7f5b51e544a9e68e719934458b::hyper_coin::DexlynUSDC', decimals: 1e6, symbol: 'dexUSDC' },
-    LUCKY:    { type: '0x4205c82380bff5708cd7c59e0043a45890a457a6cdb60c9191d818958fd7ac26::LUCKY::LUCKY', decimals: 1e6, symbol: 'LUCKY' },
-    DAWGZ:    { type: '0xb8e94e7204d8eeb565a653d262ae6f7434a3a452e2aaf624810b33dfa3b64d09::DAWGZ::DAWGZ', decimals: 1e6, symbol: 'DAWGZ' },
-    ROBBIE:   { type: '0x635f53147391781c93bf3e1c68dcea5e2f7234ec371b0f241d150465606a9007::ROBBIE::ROBBIE', decimals: 1e6, symbol: 'ROBBIE' },
-    JOSH:     { type: '0x4742d10cab62d51473bb9b4752046705d40f056abcaa59bcb266078c5945b864::JOSH::JOSH', decimals: 1e6, symbol: 'JOSH' },
-    SPIKE:    { type: '0x0fec116479f1fd3cb9732cc768e6061b0e45b178a610b9bc23c2143a6493e794::memecoins::SPIKE', decimals: 1e3, symbol: 'SPIKE' },
-    LEO:      { type: '0x83e6ebf0e08121734b117daf65677c77185e151114364f7c53bc2366f2c64a12::LEO::LEO', decimals: 1e6, symbol: 'LEO' },
-    MUMMY:    { type: '0x729982d3ad6130276c6972880810b7ddabe6d7fb59b5029fa5bed5674ae75a70::MUMMY::MUMMY', decimals: 1e6, symbol: 'MUMMY' },
-    MCB:      { type: '0xae282bd0c040c959be1ed067b525fadb38b02a4cfe6fbb27abd9a7e737aaa471::memecoinburners::MCB', decimals: 1e6, symbol: 'MCB' },
-    PECKY:    { type: '0xe54b95920ef1cf9483705a32eab8526f270bc2f936dfb4112fd6ef971509d85d::Coin::Pecky', decimals: 1e6, symbol: 'PECKY' },
-    CASH:     { type: '0x9176f70f125199a3e3d5549ce795a8e906eed75901d535ded623802f15ae3637::cdp_multi::CASH', decimals: 1e8, symbol: 'CASH' },
-    REPANDA:  { type: '0x901922a0e51b3397eb605be57653bf06c532adc617958dbf142783f6bdb1f535::RPD::RPD', decimals: 1e6, symbol: 'REPANDA' },
-    LOWCAPS:  { type: '0x35e70dea5a275dda4bdba9c5903d489891a10712dfbfa2bf04cc009f77026b94::lowCapGems::LOWCAPS', decimals: 1e6, symbol: 'LOWCAPS' },
-    BABYJOSH: { type: '0x4742d10cab62d51473bb9b4752046705d40f056abcaa59bcb266078c5945b864::BABYJOSH::BABYJOSH', decimals: 1e6, symbol: 'BABYJOSH' },
-    TSUPRA:   { type: '0x32008172b80cf1d9ed5804eddac608f0c25ac211d90e7aeff44c1993bcf0b863::TSUPRA::TSUPRA', decimals: 1e6, symbol: 'tSUPRA' },
-    WABBIT:   { type: '0x1cb8ecc17fd3415505c248567290c083b36e595d067d2122643128e81ae46d43::WABBIT::WABBIT', decimals: 1e6, symbol: 'WABBIT' },
-    NANA:     { type: '0x6253eb8c732079a4eba6fe8a194461b5051d087ad9d35ddf4a8c087e8f7a1d4e::NANA::NANA', decimals: 1e6, symbol: 'NANA' },
-    DXLYN:    { type: '0x8f7d16ade319b0fce368ca6cdb98589c4527ce7f5b51e544a9e68e719934458b::hyper_coin::DXLYN', decimals: 1e6, symbol: 'DXLYN' },
-    OG:       { type: '0xd0f37da5c7a0104d8cb161e1ac1e101f90b702c18081b76b62f20137bf40fd0b::OG::OG', decimals: 1e6, symbol: 'OG' },
-    SBC:      { type: '0xe75d56b0c61d3d82bfaff803af2aacbbf42618c1ec2226ad10ba81e408f1ac8b::SBC::SBC', decimals: 1e6, symbol: 'SBC' },
-    SUPDOG:   { type: '0x2f2514cbada3f20f092cbf6aa19ccba08c952002c1d05692154286d55682cdd1::SUPDOG::SUPDOG', decimals: 1e6, symbol: 'SUPDOG' },
-    SHILLBILL:{ type: '0x030e804570703471b2d1c347250989d31ece73e695f2efff1d19f0daab99e1ca::SHILLBILL::SHILLBILL', decimals: 1e6, symbol: 'SHILLBIL' },
-    PUMP:     { type: '0xc2896ec7a6ad3ac8a50626db9b832a142647ff065af6b30a089f64627c0c4a2b::pump_coin::PUMP', decimals: 1e6, symbol: 'PUMP' },
-    FLP:      { type: '0x159790ba3f3ca3b038d9234498ea14390ddcbab13ec96ca17c7396f77da8bf82::FLP::FLP', decimals: 1e6, symbol: 'FLP' },
-    SUPD:     { type: '0x16aae30a40726dec7737b738ff8c586623d52f861c0ed997994b0498b9a7cacd::SUPD::SUPD', decimals: 1e6, symbol: 'SUPD' },
-    STC:      { type: '0xaccc77c23159a80af1fff5aaee9c29d07915836b26a1fd8c0e1bed149f24cabc::stc::STC', decimals: 1e6, symbol: 'STC' },
+    // ═══ Tokens Dexlyn / core ═══
+    SUPRA: { type: '0x1::supra_coin::SupraCoin', decimals: 1e8, symbol: 'SUPRA' },
+    DEXUSDC: {
+      type: '0x8f7d16ade319b0fce368ca6cdb98589c4527ce7f5b51e544a9e68e719934458b::hyper_coin::DexlynUSDC',
+      decimals: 1e6,
+      symbol: 'dexUSDC',
+    },
+    LUCKY: {
+      type: '0x4205c82380bff5708cd7c59e0043a45890a457a6cdb60c9191d818958fd7ac26::LUCKY::LUCKY',
+      decimals: 1e6,
+      symbol: 'LUCKY',
+    },
+    DAWGZ: {
+      type: '0xb8e94e7204d8eeb565a653d262ae6f7434a3a452e2aaf624810b33dfa3b64d09::DAWGZ::DAWGZ',
+      decimals: 1e6,
+      symbol: 'DAWGZ',
+    },
+    ROBBIE: {
+      type: '0x635f53147391781c93bf3e1c68dcea5e2f7234ec371b0f241d150465606a9007::ROBBIE::ROBBIE',
+      decimals: 1e6,
+      symbol: 'ROBBIE',
+    },
+    JOSH: {
+      type: '0x4742d10cab62d51473bb9b4752046705d40f056abcaa59bcb266078c5945b864::JOSH::JOSH',
+      decimals: 1e6,
+      symbol: 'JOSH',
+    },
+    SPIKE: {
+      type: '0x0fec116479f1fd3cb9732cc768e6061b0e45b178a610b9bc23c2143a6493e794::memecoins::SPIKE',
+      decimals: 1e3,
+      symbol: 'SPIKE',
+    },
+    LEO: {
+      type: '0x83e6ebf0e08121734b117daf65677c77185e151114364f7c53bc2366f2c64a12::LEO::LEO',
+      decimals: 1e6,
+      symbol: 'LEO',
+    },
+    MUMMY: {
+      type: '0x729982d3ad6130276c6972880810b7ddabe6d7fb59b5029fa5bed5674ae75a70::MUMMY::MUMMY',
+      decimals: 1e6,
+      symbol: 'MUMMY',
+    },
+    MCB: {
+      type: '0xae282bd0c040c959be1ed067b525fadb38b02a4cfe6fbb27abd9a7e737aaa471::memecoinburners::MCB',
+      decimals: 1e6,
+      symbol: 'MCB',
+    },
+    PECKY: {
+      type: '0xe54b95920ef1cf9483705a32eab8526f270bc2f936dfb4112fd6ef971509d85d::Coin::Pecky',
+      decimals: 1e6,
+      symbol: 'PECKY',
+    },
+    CASH: {
+      type: '0x9176f70f125199a3e3d5549ce795a8e906eed75901d535ded623802f15ae3637::cdp_multi::CASH',
+      decimals: 1e8,
+      symbol: 'CASH',
+    },
+    REPANDA: {
+      type: '0x901922a0e51b3397eb605be57653bf06c532adc617958dbf142783f6bdb1f535::RPD::RPD',
+      decimals: 1e6,
+      symbol: 'REPANDA',
+    },
+    LOWCAPS: {
+      type: '0x35e70dea5a275dda4bdba9c5903d489891a10712dfbfa2bf04cc009f77026b94::lowCapGems::LOWCAPS',
+      decimals: 1e6,
+      symbol: 'LOWCAPS',
+    },
+    BABYJOSH: {
+      type: '0x4742d10cab62d51473bb9b4752046705d40f056abcaa59bcb266078c5945b864::BABYJOSH::BABYJOSH',
+      decimals: 1e6,
+      symbol: 'BABYJOSH',
+    },
+    TSUPRA: {
+      type: '0x32008172b80cf1d9ed5804eddac608f0c25ac211d90e7aeff44c1993bcf0b863::TSUPRA::TSUPRA',
+      decimals: 1e6,
+      symbol: 'tSUPRA',
+    },
+    WABBIT: {
+      type: '0x1cb8ecc17fd3415505c248567290c083b36e595d067d2122643128e81ae46d43::WABBIT::WABBIT',
+      decimals: 1e6,
+      symbol: 'WABBIT',
+    },
+    NANA: {
+      type: '0x6253eb8c732079a4eba6fe8a194461b5051d087ad9d35ddf4a8c087e8f7a1d4e::NANA::NANA',
+      decimals: 1e6,
+      symbol: 'NANA',
+    },
+    DXLYN: {
+      type: '0x8f7d16ade319b0fce368ca6cdb98589c4527ce7f5b51e544a9e68e719934458b::hyper_coin::DXLYN',
+      decimals: 1e6,
+      symbol: 'DXLYN',
+    },
+    OG: {
+      type: '0xd0f37da5c7a0104d8cb161e1ac1e101f90b702c18081b76b62f20137bf40fd0b::OG::OG',
+      decimals: 1e6,
+      symbol: 'OG',
+    },
+    SBC: {
+      type: '0xe75d56b0c61d3d82bfaff803af2aacbbf42618c1ec2226ad10ba81e408f1ac8b::SBC::SBC',
+      decimals: 1e6,
+      symbol: 'SBC',
+    },
+    SUPDOG: {
+      type: '0x2f2514cbada3f20f092cbf6aa19ccba08c952002c1d05692154286d55682cdd1::SUPDOG::SUPDOG',
+      decimals: 1e6,
+      symbol: 'SUPDOG',
+    },
+    SHILLBILL: {
+      type: '0x030e804570703471b2d1c347250989d31ece73e695f2efff1d19f0daab99e1ca::SHILLBILL::SHILLBILL',
+      decimals: 1e6,
+      symbol: 'SHILLBILL',
+    },
+    PUMP: {
+      type: '0xc2896ec7a6ad3ac8a50626db9b832a142647ff065af6b30a089f64627c0c4a2b::pump_coin::PUMP',
+      decimals: 1e6,
+      symbol: 'PUMP',
+    },
+    FLP: {
+      type: '0x159790ba3f3ca3b038d9234498ea14390ddcbab13ec96ca17c7396f77da8bf82::FLP::FLP',
+      decimals: 1e6,
+      symbol: 'FLP',
+    },
+    SUPD: {
+      type: '0x16aae30a40726dec7737b738ff8c586623d52f861c0ed997994b0498b9a7cacd::SUPD::SUPD',
+      decimals: 1e6,
+      symbol: 'SUPD',
+    },
+    STC: {
+      type: '0xaccc77c23159a80af1fff5aaee9c29d07915836b26a1fd8c0e1bed149f24cabc::stc::STC',
+      decimals: 1e6,
+      symbol: 'STC',
+    },
 
-    // ═══ Tokens exclusivos da Spikey (metadados das transações) ═══
-    // NOTA: nomes de módulo assumidos como o símbolo. Corrigir se necessário.
-    SOUP:     { type: '0xf11aa44964cfa8396f6519b54cb212915477cfb792c6451a5d79dc6df352e908::soup::SOUP', decimals: 1e6, symbol: 'SOUP' },
-    supUSDC:  { type: '0xf90b793d8b4b9d4a9d87c39fb3140513e52edc3ead5eaddcb9881b02becdeb63c5793d::supUSDC::SupUSDC', decimals: 1e6, symbol: 'supUSDC' },
-    supETH:   { type: '0xe4af246d2a6d2d6b3c6e3b3a6d2d6b3c6e3b3a6d2d6b3c6e3b3a6d2d6b3c6e3b3a6d::supETH::SupETH', decimals: 1e6, symbol: 'supETH' },
-    JONES:    { type: '0x8fd1550a61055c1406e04d1a0ddf7049d00c889b59f6823f21ca7d842e1eaf3c::jones::JONES', decimals: 1e6, symbol: 'JONES' },
-    DRAGON:   { type: '0x492426412135ce55b9c0e3389cbb62569e7192cd5a15963bf00c96cd9d1c578d::dragon::DRAGON', decimals: 1e6, symbol: 'DRAGON' },
-    ACD:      { type: '0x35d22638c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::acd::ACD', decimals: 1e6, symbol: 'ACD' },
-    SVLT:     { type: '0x2a0f6358c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::svlt::SVLT', decimals: 1e6, symbol: 'SVLT' },
-    SOLID:    { type: '0xaa9252aec4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::solid::SOLID', decimals: 1e6, symbol: 'SOLID' },
-    stSOLID:  { type: '0xcef206a0c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::stSOLID::StSOLID', decimals: 1e6, symbol: 'stSOLID' },
-    stSUPRA:  { type: '0x45915273c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::stSUPRA::StSUPRA', decimals: 1e6, symbol: 'stSUPRA' },
-    SYRUP:    { type: '0xacdc6851c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::syrup::SYRUP', decimals: 1e6, symbol: 'SYRUP' },
-    iSUPRA:   { type: '0x80f03a3dc4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::iSUPRA::ISUPRA', decimals: 1e6, symbol: 'iSUPRA' },
-    iUSDC:    { type: '0x90a8b281c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::iUSDC::IUSDC', decimals: 1e6, symbol: 'iUSDC' },
-    iUSDT:    { type: '0xceff1fcac4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::iUSDT::IUSDT', decimals: 1e6, symbol: 'iUSDT' },
-    iETH:     { type: '0xa0042a86c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::iETH::IETH', decimals: 1e6, symbol: 'iETH' },
-    TCP:      { type: '0x3bccf225c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::tcp::TCP', decimals: 1e6, symbol: 'TCP' },
-    HERO:     { type: '0xcd8c756cc4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::hero::HERO', decimals: 1e6, symbol: 'HERO' },
-    BEYOND8:  { type: '0xe8e47148c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::beyond8::BEYOND8', decimals: 1e6, symbol: 'BEYOND8' },
-    BLWK:     { type: '0x166fc895c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::blwk::BLWK', decimals: 1e6, symbol: 'BLWK' },
-    ARTC:     { type: '0xd7e5cf57c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::artc::ARTC', decimals: 1e6, symbol: 'ARTC' },
+    // ═══ Tokens Spikey ═══
+    // NOTA: vários addresses abaixo parecem placeholders (0x...c4a4d4a4...).
+    // O discovery on-chain da Spikey (all_pairs + FA symbol) é a fonte de verdade.
+    SOUP: {
+      type: '0xf11aa44964cfa8396f6519b54cb212915477cfb792c6451a5d79dc6df352e908::soup::SOUP',
+      decimals: 1e6,
+      symbol: 'SOUP',
+    },
+    supUSDC: {
+      type: '0xf90b793d8b4b9d4a9d87c39fb3140513e52edc3ead5eaddcb9881b02becdeb63c5793d::supUSDC::SupUSDC',
+      decimals: 1e6,
+      symbol: 'supUSDC',
+    },
+    supETH: {
+      type: '0xe4af246d2a6d2d6b3c6e3b3a6d2d6b3c6e3b3a6d2d6b3c6e3b3a6d2d6b3c6e3b3a6d::supETH::SupETH',
+      decimals: 1e6,
+      symbol: 'supETH',
+    },
+    JONES: {
+      type: '0x8fd1550a61055c1406e04d1a0ddf7049d00c889b59f6823f21ca7d842e1eaf3c::jones::JONES',
+      decimals: 1e6,
+      symbol: 'JONES',
+    },
+    DRAGON: {
+      type: '0x492426412135ce55b9c0e3389cbb62569e7192cd5a15963bf00c96cd9d1c578d::dragon::DRAGON',
+      decimals: 1e6,
+      symbol: 'DRAGON',
+    },
+    ACD: {
+      type: '0x35d22638c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::acd::ACD',
+      decimals: 1e6,
+      symbol: 'ACD',
+    },
+    SVLT: {
+      type: '0x2a0f6358c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::svlt::SVLT',
+      decimals: 1e6,
+      symbol: 'SVLT',
+    },
+    SOLID: {
+      type: '0xaa9252aec4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::solid::SOLID',
+      decimals: 1e6,
+      symbol: 'SOLID',
+    },
+    stSOLID: {
+      type: '0xcef206a0c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::stSOLID::StSOLID',
+      decimals: 1e6,
+      symbol: 'stSOLID',
+    },
+    stSUPRA: {
+      type: '0x45915273c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::stSUPRA::StSUPRA',
+      decimals: 1e6,
+      symbol: 'stSUPRA',
+    },
+    SYRUP: {
+      type: '0xacdc6851c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::syrup::SYRUP',
+      decimals: 1e6,
+      symbol: 'SYRUP',
+    },
+    iSUPRA: {
+      type: '0x80f03a3dc4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::iSUPRA::ISUPRA',
+      decimals: 1e6,
+      symbol: 'iSUPRA',
+    },
+    iUSDC: {
+      type: '0x90a8b281c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::iUSDC::IUSDC',
+      decimals: 1e6,
+      symbol: 'iUSDC',
+    },
+    iUSDT: {
+      type: '0xceff1fcac4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::iUSDT::IUSDT',
+      decimals: 1e6,
+      symbol: 'iUSDT',
+    },
+    iETH: {
+      type: '0xa0042a86c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::iETH::IETH',
+      decimals: 1e6,
+      symbol: 'iETH',
+    },
+    TCP: {
+      type: '0x3bccf225c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::tcp::TCP',
+      decimals: 1e6,
+      symbol: 'TCP',
+    },
+    HERO: {
+      type: '0xcd8c756cc4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::hero::HERO',
+      decimals: 1e6,
+      symbol: 'HERO',
+    },
+    BEYOND8: {
+      type: '0xe8e47148c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::beyond8::BEYOND8',
+      decimals: 1e6,
+      symbol: 'BEYOND8',
+    },
+    BLWK: {
+      type: '0x166fc895c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::blwk::BLWK',
+      decimals: 1e6,
+      symbol: 'BLWK',
+    },
+    ARTC: {
+      type: '0xd7e5cf57c4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a4d4a::artc::ARTC',
+      decimals: 1e6,
+      symbol: 'ARTC',
+    },
   },
 };
 
