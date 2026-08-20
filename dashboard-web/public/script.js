@@ -27,6 +27,8 @@ const elements = {
     consoleOutput: document.getElementById('consoleOutput'),
     commandInput: document.getElementById('commandInput'),
     sendButton: document.getElementById('sendCommand'),
+    codegenInput: document.getElementById('codegenInput'),
+    sendCodegen: document.getElementById('sendCodegen'),
     lastUpdate: document.getElementById('lastUpdate'),
     metricProfit: document.getElementById('metricProfit'),
     metricTrades: document.getElementById('metricTrades'),
@@ -168,19 +170,23 @@ function renderProposals(proposals) {
         return;
     }
 
-    elements.proposalsList.innerHTML = proposals.map(p => `
+    elements.proposalsList.innerHTML = proposals.map(p => {
+        const blocked = p.type === 'code_change' && p.payload?.safetyScan && !p.payload.safetyScan.safe;
+        return `
         <div class="brain-thought proposal-item" data-id="${p.id}">
             <div class="proposal-header">
                 <span class="thought-time">${new Date(p.ts).toLocaleString()}</span>
                 <span class="proposal-type">${p.type}</span>
             </div>
             <span class="thought-text">${escapeHtml(p.summary || '')}</span>
+            ${renderProposalCode(p)}
             <div class="proposal-actions">
-                <button class="approve-btn" data-id="${p.id}">✅ Aprovar</button>
+                <button class="approve-btn" data-id="${p.id}" ${blocked ? 'disabled title="Bloqueado pelo scan de segurança"' : ''}>✅ Aprovar</button>
                 <button class="reject-btn" data-id="${p.id}">❌ Rejeitar</button>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 
     elements.proposalsList.querySelectorAll('.approve-btn').forEach(btn => {
         btn.addEventListener('click', () => decideProposal(btn.dataset.id, 'approve'));
@@ -213,6 +219,24 @@ function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+function renderProposalCode(p) {
+    if (p.type !== 'code_change' || !p.payload) return '';
+    const { targetPath, code, explanation, safetyScan } = p.payload;
+    const blocked = safetyScan && !safetyScan.safe;
+    const warnHtml = (safetyScan?.warnings || []).map(w => `<div class="proposal-warning">⚠️ ${escapeHtml(w)}</div>`).join('');
+    const blockHtml = blocked
+        ? `<div class="proposal-blocked">🚫 BLOQUEADO pelo scan de segurança: ${escapeHtml((safetyScan.blocks || []).join('; '))} -- não pode ser aprovado.</div>`
+        : '';
+    return `
+        <div class="proposal-code-block">
+            <div class="proposal-target-path">📄 ${escapeHtml(targetPath || '')}</div>
+            ${explanation ? `<div class="proposal-explanation">${escapeHtml(explanation)}</div>` : ''}
+            ${blockHtml}${warnHtml}
+            <pre class="proposal-code"><code>${escapeHtml(code || '')}</code></pre>
+        </div>
+    `;
 }
 
 // ============================================
@@ -253,6 +277,42 @@ elements.commandInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); sendCommand(); }
 });
 elements.sendButton.addEventListener('click', sendCommand);
+
+async function sendCodegen() {
+    const input = elements.codegenInput;
+    const request = input.value.trim();
+    if (!request) return;
+    input.value = '';
+    input.disabled = true;
+    elements.sendCodegen.disabled = true;
+    elements.sendCodegen.textContent = 'A gerar...';
+
+    addConsoleLine(`🛠️ Pedido de componente: ${request}`, 'user');
+    try {
+        const res = await fetch(`${API_URL}/api/generate-component`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ request }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            addConsoleLine(`🤖 Componente proposto: ${data.data.payload.targetPath} -- revê e aprova acima.`, 'bot');
+            fetch(`${API_URL}/api/dashboard`).then(r => r.json()).then(d => { if (d.success) updateDashboard(d.data); });
+        } else {
+            addConsoleLine(`❌ ${data.error}`, 'error');
+        }
+    } catch (e) {
+        addConsoleLine(`❌ Erro de comunicação: ${e.message}`, 'error');
+    } finally {
+        input.disabled = false;
+        elements.sendCodegen.disabled = false;
+        elements.sendCodegen.textContent = 'Gerar';
+    }
+}
+elements.codegenInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); sendCodegen(); }
+});
+elements.sendCodegen.addEventListener('click', sendCodegen);
 
 // ============================================
 // INICIALIZAR

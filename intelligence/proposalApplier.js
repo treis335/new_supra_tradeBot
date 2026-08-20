@@ -8,11 +8,20 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const { CONFIG } = require('../config/config');
 const { getProposal, setStatus } = require('./proposalQueue');
+const { scanCode } = require('./codeSafetyScanner');
 
 const OVERRIDES_FILE = path.join(__dirname, '..', 'data', 'live_overrides.json');
 const POOLS_FILE = path.join(__dirname, '..', 'spikeyPools.json');
+const PROJECT_ROOT = path.join(__dirname, '..');
+
+// Únicas pastas onde código gerado por IA pode ser escrito. Qualquer
+// targetPath fora disto é recusado -- mesmo que a proposta pareça aprovada,
+// mesmo que o próprio codeAgent.js já tenha tentado restringir isto (nunca
+// confiamos só na camada anterior).
+const ALLOWED_CODE_DIRS = ['strategies', 'intelligence/generated'];
 
 // Mesmos limites usados pelo evolver.js -- uma proposta aprovada nunca pode
 // sair destes limites, mesmo que o valor pedido seja diferente.
@@ -81,6 +90,57 @@ function applyIdea(payload) {
     return { applied: false, reason: 'ideia registada -- não gera mudança automática, é só para leitura' };
 }
 
+// 'code_change' -- ficheiro novo escrito pela IA (intelligence/codeAgent.js).
+// Segunda verificação de segurança AQUI, mesmo que já tenha passado no
+// codeAgent.js -- nunca confiamos só na camada anterior, porque o payload
+// vive em data/proposals.json e podia teoricamente ter sido editado à mão
+// entre a criação e a aprovação.
+function applyCodeChange(payload) {
+    const { targetPath, code } = payload || {};
+    if (typeof targetPath !== 'string' || typeof code !== 'string') {
+        throw new Error('proposta de código incompleta (falta targetPath ou code)');
+    }
+
+    // Normaliza e confirma que o caminho fica DENTRO de uma pasta permitida,
+    // sem ../ para escapar, sem caminho absoluto.
+    const normalized = path.normalize(targetPath).replace(/^(\.\.[/\\])+/, '');
+    const dirPart = normalized.split(/[/\\]/)[0];
+    if (path.isAbsolute(targetPath) || normalized.includes('..') || !ALLOWED_CODE_DIRS.includes(dirPart)) {
+        throw new Error(`targetPath "${targetPath}" não está numa pasta permitida (${ALLOWED_CODE_DIRS.join(', ')})`);
+    }
+
+    const fullPath = path.join(PROJECT_ROOT, normalized);
+    if (!fullPath.startsWith(PROJECT_ROOT)) {
+        throw new Error('targetPath tenta escapar do diretório do projeto');
+    }
+
+    const tmpFile = path.join(require('os').tmpdir(), `applycheck_${Date.now()}.js`);
+    fs.writeFileSync(tmpFile, code);
+    try {
+        execSync(`node --check "${tmpFile}"`, { stdio: 'pipe' });
+    } catch (e) {
+        fs.unlinkSync(tmpFile);
+        throw new Error(`código tem erro de sintaxe, recusado: ${e.stderr?.toString()?.slice(0, 300) || e.message}`);
+    }
+    fs.unlinkSync(tmpFile);
+
+    const scan = scanCode(code);
+    if (!scan.safe) {
+        throw new Error(`código bloqueado pelo scan de segurança: ${scan.blocks.join('; ')}`);
+    }
+
+    const dir = path.dirname(fullPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(fullPath, code);
+
+    return {
+        applied: true,
+        writtenTo: normalized,
+        warnings: scan.warnings,
+        note: 'ficheiro criado, mas não está ligado a nada do bot ainda -- para o usar (ex: no loop de trading), isso é uma proposta separada.',
+    };
+}
+
 function applyProposal(id) {
     const proposal = getProposal(id);
     if (!proposal) throw new Error('proposta não encontrada');
@@ -93,6 +153,7 @@ function applyProposal(id) {
             case 'add_pool': result = applyAddPool(proposal.payload); break;
             case 'execute_trade': result = applyExecuteTrade(proposal.payload); break;
             case 'idea': result = applyIdea(proposal.payload); break;
+            case 'code_change': result = applyCodeChange(proposal.payload); break;
             default: throw new Error(`tipo de proposta desconhecido: ${proposal.type}`);
         }
         setStatus(id, 'applied', { result });

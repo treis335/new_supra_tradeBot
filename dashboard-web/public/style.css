@@ -186,6 +186,68 @@ body {
 }
 
 /* ============================================
+   CODE PROPOSALS (code_change)
+   ============================================ */
+.proposal-code-block {
+    margin: 8px 0;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+
+.proposal-target-path {
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: var(--accent-magenta, #d946ef);
+    margin-bottom: 4px;
+}
+
+.proposal-explanation {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.proposal-warning {
+    font-size: 0.75rem;
+    color: #f59e0b;
+    margin-bottom: 4px;
+}
+
+.proposal-blocked {
+    font-size: 0.8rem;
+    color: #ef4444;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.proposal-code {
+    max-height: 220px;
+    overflow: auto;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    white-space: pre;
+}
+
+.proposal-actions button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.codegen-card {
+    grid-column: span 2;
+}
+
+.codegen-hint {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+}
+
+/* ============================================
    BRAIN CARD
    ============================================ */
 .brain-card {

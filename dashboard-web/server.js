@@ -9,6 +9,7 @@ const { DeepSeekAPI } = require('../agent/deepseekClient');
 const { listProposals, getProposal, setStatus } = require('../intelligence/proposalQueue');
 const { applyProposal } = require('../intelligence/proposalApplier');
 const { readRecentHistory } = require('../intelligence/historyLogger');
+const { generateComponent } = require('../intelligence/codeAgent');
 
 const app = express();
 const server = http.createServer(app);
@@ -215,6 +216,26 @@ app.post('/api/proposals/:id/reject', (req, res) => {
     setStatus(req.params.id, 'rejected', { reason: req.body?.reason || null });
     broadcast({ type: 'proposal_rejected', data: { id: req.params.id } });
     res.json({ success: true });
+});
+
+// Pede à DeepSeek para escrever um componente novo (estratégia/detetor).
+// Nunca escreve nada sozinho -- fica registado como proposta 'code_change',
+// visível aqui no dashboard, à espera de aprovação. Ver intelligence/codeAgent.js.
+app.post('/api/generate-component', async (req, res) => {
+    const { request } = req.body || {};
+    if (!request || typeof request !== 'string') {
+        return res.status(400).json({ success: false, error: 'falta o campo "request" (descreve o que queres que o agente construa)' });
+    }
+    try {
+        const result = await generateComponent(request);
+        if (result.error) return res.status(500).json({ success: false, error: result.error });
+        if (result.skipped) return res.status(400).json({ success: false, error: result.reason });
+        if (result.rejected) return res.status(400).json({ success: false, error: `código descartado: ${result.reason}` });
+        broadcast({ type: 'proposal_created', data: result.proposal });
+        res.json({ success: true, data: result.proposal });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
 });
 
 // API: Comandos
