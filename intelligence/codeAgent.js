@@ -20,6 +20,7 @@ const { CONFIG } = require('../config/config');
 const { readRecentHistory } = require('./historyLogger');
 const { addProposal } = require('./proposalQueue');
 const { scanCode } = require('./codeSafetyScanner');
+const { withCharter } = require('./agentCharter');
 const { logError } = require('../utils/logError');
 
 async function callDeepSeek(systemPrompt, userPrompt) {
@@ -32,7 +33,7 @@ async function callDeepSeek(systemPrompt, userPrompt) {
         body: JSON.stringify({
             model: 'deepseek-chat',
             messages: [
-                { role: 'system', content: systemPrompt },
+                { role: 'system', content: withCharter(systemPrompt) },
                 { role: 'user', content: userPrompt },
             ],
             response_format: { type: 'json_object' },

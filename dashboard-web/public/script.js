@@ -29,6 +29,7 @@ const elements = {
     sendButton: document.getElementById('sendCommand'),
     codegenInput: document.getElementById('codegenInput'),
     sendCodegen: document.getElementById('sendCodegen'),
+    restartBotBtn: document.getElementById('restartBotBtn'),
     lastUpdate: document.getElementById('lastUpdate'),
     metricProfit: document.getElementById('metricProfit'),
     metricTrades: document.getElementById('metricTrades'),
@@ -313,6 +314,30 @@ elements.codegenInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); sendCodegen(); }
 });
 elements.sendCodegen.addEventListener('click', sendCodegen);
+
+async function restartBot() {
+    if (!confirm('Reiniciar o bot de trading agora? Isto só tem efeito se estiver a correr via "node start-all.js". Se a mudança recente causar um crash, o sistema tenta reverter sozinho.')) return;
+    elements.restartBotBtn.disabled = true;
+    elements.restartBotBtn.textContent = 'A reiniciar...';
+    addConsoleLine('🔄 Pedido de reinício do bot enviado.', 'system');
+    try {
+        const res = await fetch(`${API_URL}/api/restart-bot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: 'pedido manual via dashboard' }),
+        });
+        const data = await res.json();
+        addConsoleLine(data.success ? `✅ ${data.message}` : `❌ ${data.error}`, data.success ? 'system' : 'error');
+    } catch (e) {
+        addConsoleLine(`❌ Erro de comunicação: ${e.message}`, 'error');
+    } finally {
+        setTimeout(() => {
+            elements.restartBotBtn.disabled = false;
+            elements.restartBotBtn.textContent = '🔄 Reiniciar Bot';
+        }, 3000);
+    }
+}
+elements.restartBotBtn.addEventListener('click', restartBot);
 
 // ============================================
 // INICIALIZAR

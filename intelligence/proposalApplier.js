@@ -16,6 +16,8 @@ const { scanCode } = require('./codeSafetyScanner');
 const OVERRIDES_FILE = path.join(__dirname, '..', 'data', 'live_overrides.json');
 const POOLS_FILE = path.join(__dirname, '..', 'spikeyPools.json');
 const PROJECT_ROOT = path.join(__dirname, '..');
+const LAST_APPLIED_FILE = path.join(__dirname, '..', 'data', 'last_applied.json');
+const RESTART_REQUEST_FILE = path.join(__dirname, '..', 'data', 'restart_request.json');
 
 // Únicas pastas onde código gerado por IA pode ser escrito. Qualquer
 // targetPath fora disto é recusado -- mesmo que a proposta pareça aprovada,
@@ -39,6 +41,7 @@ function clamp(value, bounds) {
 }
 
 function applyConfigAdjust(payload) {
+    const previousAutoExecute = { ...CONFIG.autoExecute };
     const clamped = {};
     for (const [key, bounds] of Object.entries(SAFE_BOUNDS)) {
         if (payload[key] === undefined || payload[key] === null) continue;
@@ -48,7 +51,7 @@ function applyConfigAdjust(payload) {
     const dir = path.dirname(OVERRIDES_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(OVERRIDES_FILE, JSON.stringify({ autoExecute: { ...CONFIG.autoExecute }, savedAt: Date.now() }, null, 2));
-    return { applied: clamped };
+    return { applied: clamped, rollbackInfo: { previousAutoExecute } };
 }
 
 function applyAddPool(payload) {
@@ -71,7 +74,7 @@ function applyAddPool(payload) {
     }
     pools.push({ address, tokenA, tokenB, addedAt: Date.now(), source: 'proposal_approved' });
     fs.writeFileSync(POOLS_FILE, JSON.stringify(pools, null, 2));
-    return { applied: true, pool: { address, tokenA, tokenB } };
+    return { applied: true, pool: { address, tokenA, tokenB }, rollbackInfo: { addedAddress: address } };
 }
 
 // execute_trade NUNCA é auto-aplicável por este caminho -- trades reais
@@ -129,6 +132,12 @@ function applyCodeChange(payload) {
         throw new Error(`código bloqueado pelo scan de segurança: ${scan.blocks.join('; ')}`);
     }
 
+    // Guarda o conteúdo anterior (se existia) para poder reverter -- ficheiros
+    // gerados são quase sempre novos, mas se um dia isto sobrescrever um
+    // componente já aprovado antes, queremos poder voltar atrás.
+    const existedBefore = fs.existsSync(fullPath);
+    const previousContent = existedBefore ? fs.readFileSync(fullPath, 'utf8') : null;
+
     const dir = path.dirname(fullPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(fullPath, code);
@@ -138,7 +147,71 @@ function applyCodeChange(payload) {
         writtenTo: normalized,
         warnings: scan.warnings,
         note: 'ficheiro criado, mas não está ligado a nada do bot ainda -- para o usar (ex: no loop de trading), isso é uma proposta separada.',
+        rollbackInfo: { targetPath: normalized, existedBefore, previousContent },
     };
+}
+
+// Tipos de proposta cuja mudança só faz efeito completo depois de o bot
+// reiniciar (hoje: nenhum -- config aplica-se logo em memória, código novo
+// fica isolado até outra proposta o ligar ao bot). Mantido como lista
+// explícita para quando isso deixar de ser verdade (ex: proposta que liga
+// um componente ao loop de trading).
+const TYPES_REQUIRING_RESTART = [];
+
+function requestRestart(reason) {
+    const dir = path.dirname(RESTART_REQUEST_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(RESTART_REQUEST_FILE, JSON.stringify({ reason, requestedAt: Date.now() }, null, 2));
+}
+
+function recordLastApplied(proposal, result) {
+    const dir = path.dirname(LAST_APPLIED_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(LAST_APPLIED_FILE, JSON.stringify({
+        proposalId: proposal.id,
+        type: proposal.type,
+        appliedAt: Date.now(),
+        rollbackInfo: result?.rollbackInfo || null,
+        rolledBack: false,
+    }, null, 2));
+}
+
+// Chamado pelo utils/botSupervisor.js quando o bot cai logo a seguir a um
+// reinício pedido por uma mudança aplicada -- reverte com base no que foi
+// gravado em recordLastApplied(), para NUNCA deixar o bot preso a correr
+// com uma mudança que o está a fazer rebentar.
+function rollbackToPreviousChampion(lastApplied) {
+    if (!lastApplied || !lastApplied.rollbackInfo) {
+        throw new Error('sem informação de rollback disponível para esta mudança');
+    }
+    const { type, rollbackInfo } = lastApplied;
+
+    switch (type) {
+        case 'config_adjust': {
+            Object.assign(CONFIG.autoExecute, rollbackInfo.previousAutoExecute);
+            fs.writeFileSync(OVERRIDES_FILE, JSON.stringify({ autoExecute: { ...CONFIG.autoExecute }, savedAt: Date.now(), revertedFrom: lastApplied.proposalId }, null, 2));
+            return;
+        }
+        case 'add_pool': {
+            if (!fs.existsSync(POOLS_FILE)) return;
+            let pools = [];
+            try { pools = JSON.parse(fs.readFileSync(POOLS_FILE, 'utf8')); } catch { return; }
+            pools = pools.filter(p => p.address !== rollbackInfo.addedAddress);
+            fs.writeFileSync(POOLS_FILE, JSON.stringify(pools, null, 2));
+            return;
+        }
+        case 'code_change': {
+            const fullPath = path.join(PROJECT_ROOT, rollbackInfo.targetPath);
+            if (rollbackInfo.existedBefore) {
+                fs.writeFileSync(fullPath, rollbackInfo.previousContent);
+            } else if (fs.existsSync(fullPath)) {
+                fs.unlinkSync(fullPath);
+            }
+            return;
+        }
+        default:
+            throw new Error(`rollback não suportado para o tipo '${type}'`);
+    }
 }
 
 function applyProposal(id) {
@@ -157,6 +230,14 @@ function applyProposal(id) {
             default: throw new Error(`tipo de proposta desconhecido: ${proposal.type}`);
         }
         setStatus(id, 'applied', { result });
+
+        if (result?.rollbackInfo) {
+            recordLastApplied(proposal, result);
+        }
+        if (TYPES_REQUIRING_RESTART.includes(proposal.type)) {
+            requestRestart(`proposta ${proposal.id} (${proposal.type}) aprovada`);
+        }
+
         return result;
     } catch (e) {
         setStatus(id, 'apply_failed', { error: e.message });
@@ -164,4 +245,13 @@ function applyProposal(id) {
     }
 }
 
-module.exports = { applyProposal, SAFE_BOUNDS };
+// Reinício pedido manualmente pelo humano no dashboard (ex: depois de editar
+// algo à mão, ou só para confirmar que o mecanismo funciona). Também passa
+// pelo mesmo registo -- se o bot cair logo a seguir, mas não há
+// rollbackInfo de nenhuma proposta recente, o supervisor tenta reiniciar
+// sem reverter nada (não há nada para reverter).
+function requestManualRestart(reason) {
+    requestRestart(reason || 'reinício manual pedido no dashboard');
+}
+
+module.exports = { applyProposal, rollbackToPreviousChampion, requestManualRestart, SAFE_BOUNDS };

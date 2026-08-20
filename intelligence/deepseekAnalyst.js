@@ -15,6 +15,7 @@ const { CONFIG } = require('../config/config');
 const { readRecentHistory, logEvent } = require('./historyLogger');
 const { logError } = require('../utils/logError');
 const { addProposal } = require('./proposalQueue');
+const { withCharter } = require('./agentCharter');
 
 const REPORT_FILE = path.join(__dirname, '..', 'data', 'analyst_reports.jsonl');
 
@@ -44,7 +45,7 @@ async function callDeepSeek(systemPrompt, userPrompt) {
         body: JSON.stringify({
             model: 'deepseek-chat',
             messages: [
-                { role: 'system', content: systemPrompt },
+                { role: 'system', content: withCharter(systemPrompt) },
                 { role: 'user', content: userPrompt },
             ],
             response_format: { type: 'json_object' },

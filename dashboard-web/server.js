@@ -7,7 +7,7 @@ const fs = require('fs');
 const cors = require('cors');
 const { DeepSeekAPI } = require('../agent/deepseekClient');
 const { listProposals, getProposal, setStatus } = require('../intelligence/proposalQueue');
-const { applyProposal } = require('../intelligence/proposalApplier');
+const { applyProposal, requestManualRestart } = require('../intelligence/proposalApplier');
 const { readRecentHistory } = require('../intelligence/historyLogger');
 const { generateComponent } = require('../intelligence/codeAgent');
 
@@ -233,6 +233,20 @@ app.post('/api/generate-component', async (req, res) => {
         if (result.rejected) return res.status(400).json({ success: false, error: `código descartado: ${result.reason}` });
         broadcast({ type: 'proposal_created', data: result.proposal });
         res.json({ success: true, data: result.proposal });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Reinício manual do bot -- pede ao utils/botSupervisor.js (se o bot estiver
+// a correr via start-all.js) para reiniciar o processo de trading. Útil
+// depois de aprovar uma mudança, ou só para testar o mecanismo. Se o bot
+// cair logo a seguir a este reinício, o supervisor tenta reverter sozinho
+// a última mudança aplicada (ver intelligence/proposalApplier.js).
+app.post('/api/restart-bot', (req, res) => {
+    try {
+        requestManualRestart(req.body?.reason);
+        res.json({ success: true, message: 'Reinício pedido -- só tem efeito se o bot estiver a correr via "node start-all.js".' });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }

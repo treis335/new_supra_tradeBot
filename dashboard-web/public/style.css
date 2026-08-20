@@ -241,6 +241,31 @@ body {
     grid-column: span 2;
 }
 
+.restart-row {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.restart-btn {
+    background: #f59e0b;
+    color: #1a0f00;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.restart-btn:hover { filter: brightness(1.1); }
+.restart-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .codegen-hint {
     font-size: 0.85rem;
     color: var(--text-secondary);
