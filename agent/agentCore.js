@@ -52,40 +52,38 @@ class AgentCore {
     // ============================================
 
     async ajustarParametro(params) {
+        // Nunca escreve diretamente em config/config.js -- isto usava regex
+        // livre sobre o ficheiro fonte real, capaz de acertar em QUALQUER
+        // chave (incluindo rpc, moduleAddress, etc.) consoante o que o
+        // agente ou o humano escrevesse. Fica como proposta; só chaves
+        // conhecidas e seguras (ver proposalApplier.SAFE_BOUNDS) chegam a
+        // ser aplicadas, e sempre dentro de limites presos.
         const { nome, valor } = params;
-        try {
-            const configPath = path.join(__dirname, '../config/config.js');
-            if (fs.existsSync(configPath)) {
-                let configContent = fs.readFileSync(configPath, 'utf8');
-                const regex = new RegExp(`${nome}:\\s*[^,\\n]+`, 'g');
-                configContent = configContent.replace(regex, `${nome}: ${valor}`);
-                fs.writeFileSync(configPath, configContent);
-                return { success: true, message: `✅ Parâmetro ${nome} ajustado para ${valor}` };
-            }
-            return { success: false, message: '⚠️ Arquivo de configuração não encontrado' };
-        } catch (error) {
-            return { success: false, message: `❌ Erro: ${error.message}` };
-        }
+        const { addProposal } = require('../intelligence/proposalQueue');
+        addProposal({
+            type: 'config_adjust',
+            summary: `Ajuste sugerido via chat: ${nome} = ${valor}`,
+            payload: { [nome]: valor },
+            source: 'agentCore.ajustarParametro',
+        });
+        return { success: true, message: `📋 Proposta registada (${nome} = ${valor}) -- aguarda aprovação no dashboard. Só é aplicada se "${nome}" for um parâmetro reconhecido e dentro dos limites seguros.` };
     }
 
     async executarTrade(params) {
+        // Execução de trades por comando de chat NUNCA dispara uma trade real
+        // diretamente -- fica registada como proposta para referência humana.
+        // O caminho real de trading é sempre o auto-execute do bot (com os
+        // seus próprios limiares e limites) ou a execução manual na TUI
+        // principal (tecla 'e'), nunca um texto interpretado livremente aqui.
         const { pair, quantidade } = params;
-        try {
-            let executor;
-            try {
-                executor = require('../executor/executor');
-            } catch (e) {
-                return { success: false, message: '⚠️ Módulo executor não disponível' };
-            }
-            
-            if (executor && typeof executor.executeTrade === 'function') {
-                const result = await executor.executeTrade(pair, quantidade);
-                return { success: true, message: `✅ Trade executado: ${JSON.stringify(result)}` };
-            }
-            return { success: false, message: '⚠️ Função executeTrade não encontrada' };
-        } catch (error) {
-            return { success: false, message: `❌ Erro ao executar trade: ${error.message}` };
-        }
+        const { addProposal } = require('../intelligence/proposalQueue');
+        addProposal({
+            type: 'execute_trade',
+            summary: `Pedido de trade via chat: ${pair} qtd ${quantidade} (informativo -- não executa sozinho)`,
+            payload: { pair, quantidade },
+            source: 'agentCore.executarTrade',
+        });
+        return { success: true, message: '📋 Registei o pedido, mas trades não são disparadas por comando de chat. Usa a tecla "e" na TUI principal ou deixa o auto-execute do bot atuar dentro dos limiares configurados.' };
     }
 
     async analisarPerformance() {
@@ -176,22 +174,18 @@ class AgentCore {
     }
 
     async adicionarPool(params) {
-        const { endereco } = params;
-        try {
-            const poolsPath = path.join(__dirname, '../spikeyPools.json');
-            let pools = [];
-            if (fs.existsSync(poolsPath)) {
-                pools = JSON.parse(fs.readFileSync(poolsPath, 'utf8'));
-            }
-            if (!pools.includes(endereco)) {
-                pools.push(endereco);
-                fs.writeFileSync(poolsPath, JSON.stringify(pools, null, 2));
-                return { success: true, message: `✅ Pool ${endereco} adicionado com sucesso` };
-            }
-            return { success: true, message: `ℹ️ Pool ${endereco} já existe` };
-        } catch (error) {
-            return { success: false, message: `❌ Erro ao adicionar pool: ${error.message}` };
+        const { endereco, tokenA, tokenB } = params;
+        if (!tokenA || !tokenB) {
+            return { success: false, message: '❌ Preciso do endereço, tokenA e tokenB para propor o pool (não posso adicionar só o endereço -- corromperia o ficheiro de pools).' };
         }
+        const { addProposal } = require('../intelligence/proposalQueue');
+        addProposal({
+            type: 'add_pool',
+            summary: `Adicionar pool ${endereco} (${tokenA}/${tokenB})`,
+            payload: { address: endereco, tokenA, tokenB },
+            source: 'agentCore.adicionarPool',
+        });
+        return { success: true, message: `📋 Proposta registada para o pool ${endereco} -- aguarda a tua aprovação no dashboard (http://localhost:3000).` };
     }
 
     // ============================================

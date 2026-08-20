@@ -1,57 +1,70 @@
 // intelligence/proposalQueue.js
 //
-// Aqui fica a "evolução" do bot: a DeepSeek pode propor mudanças (ajustes de
-// parâmetros, ideias de novas funcionalidades, pools a considerar), mas NADA
-// entra em vigor sozinho. Cada proposta fica registada com status "pending"
-// até um humano aprovar ou rejeitar via dashboard (/api/proposals/:id/decide)
-// ou via CLI (scripts/reviewProposals.js).
+// QUALQUER coisa que o agente (DeepSeek, autonomousBrain, executorActions,
+// agentCore) queira mudar no bot -- parâmetros, pools, o que for -- passa
+// primeiro por aqui. Nada é aplicado automaticamente. Uma proposta só se
+// torna real depois de alguém a aprovar explicitamente (via dashboard ou
+// função applyProposal chamada manualmente).
 //
-// Isto é deliberado: um sistema que decide sozinho ajustar parâmetros de risco
-// ou mexer no código de execução, sem ninguém ver antes, é como um bot antigo
-// tentou fazer (agent/executorActions.js) -- e tinha bugs que corrompiam dados
-// silenciosamente. A fila de aprovação existe precisamente para apanhar isso.
+// Isto substitui os pontos do código que antes escreviam diretamente em
+// config/config.js ou executavam trades sem ninguém ver.
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
-const PROPOSALS_FILE = path.join(__dirname, '..', 'data', 'proposals.jsonl');
+const PROPOSALS_FILE = path.join(__dirname, '..', 'data', 'proposals.json');
+const MAX_PROPOSALS = 200;
 
-function ensureDataDir() {
-    const dir = path.dirname(PROPOSALS_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
-function createProposal({ type, title, description, payload }) {
-    ensureDataDir();
-    const proposal = {
-        id: crypto.randomUUID(),
-        ts: Date.now(),
-        type, // 'config_change' | 'new_pool' | 'idea'
-        title, description, payload,
-        status: 'pending', // 'pending' | 'approved' | 'rejected'
-    };
-    fs.appendFileSync(PROPOSALS_FILE, JSON.stringify(proposal) + '\n');
-    return proposal;
-}
-
-function listProposals({ statusFilter = null } = {}) {
+function loadAll() {
     try {
         if (!fs.existsSync(PROPOSALS_FILE)) return [];
-        const lines = fs.readFileSync(PROPOSALS_FILE, 'utf8').split('\n').filter(Boolean);
-        const all = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-        return statusFilter ? all.filter(p => p.status === statusFilter) : all;
-    } catch {
+        return JSON.parse(fs.readFileSync(PROPOSALS_FILE, 'utf8'));
+    } catch (e) {
+        console.error('[proposalQueue] falha ao ler, a começar vazio:', e.message);
         return [];
     }
 }
 
-function decideProposal(id, decision) {
-    if (!['approved', 'rejected'].includes(decision)) throw new Error('decision invalida');
-    const all = listProposals();
-    const updated = all.map(p => (p.id === id ? { ...p, status: decision, decidedAt: Date.now() } : p));
-    fs.writeFileSync(PROPOSALS_FILE, updated.map(p => JSON.stringify(p)).join('\n') + '\n');
-    return updated.find(p => p.id === id);
+function saveAll(list) {
+    const dir = path.dirname(PROPOSALS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(PROPOSALS_FILE, JSON.stringify(list.slice(-MAX_PROPOSALS), null, 2));
 }
 
-module.exports = { createProposal, listProposals, decideProposal };
+function addProposal({ type, summary, payload, source }) {
+    const list = loadAll();
+    const proposal = {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        ts: Date.now(),
+        type,        // 'config_adjust' | 'add_pool' | 'execute_trade' | 'other'
+        summary,     // texto legível para mostrar no dashboard
+        payload,     // dados estruturados necessários para aplicar, se aprovado
+        source: source || 'unknown',
+        status: 'pending', // 'pending' | 'approved' | 'rejected' | 'applied' | 'apply_failed'
+        reviewedAt: null,
+    };
+    list.push(proposal);
+    saveAll(list);
+    console.log(`📋 [proposalQueue] Nova proposta pendente (${type}): ${summary}`);
+    return proposal;
+}
+
+function listProposals(status = null) {
+    const list = loadAll();
+    return status ? list.filter(p => p.status === status) : list;
+}
+
+function getProposal(id) {
+    return loadAll().find(p => p.id === id) || null;
+}
+
+function setStatus(id, status, extra = {}) {
+    const list = loadAll();
+    const idx = list.findIndex(p => p.id === id);
+    if (idx === -1) return null;
+    list[idx] = { ...list[idx], status, reviewedAt: Date.now(), ...extra };
+    saveAll(list);
+    return list[idx];
+}
+
+module.exports = { addProposal, listProposals, getProposal, setStatus };

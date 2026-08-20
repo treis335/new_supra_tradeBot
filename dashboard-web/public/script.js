@@ -106,19 +106,19 @@ function updateDashboard(data) {
 
     if (data.botStats) {
         const stats = data.botStats;
-        elements.botRunning.textContent = data.running ? '🟢 ATIVO' : '🔴 NÃO ESTÁ A CORRER';
+        elements.botRunning.textContent = stats.running ? '🟢 ATIVO' : '🔴 NÃO ESTÁ A CORRER';
         elements.botBalance.textContent = stats.balance || 'sem dados';
         elements.botPairs.textContent = stats.pairs ?? '—';
-        elements.botTrades.textContent = stats.totalTrades24h ?? 0;
-        elements.botProfit.textContent = stats.profitAbs24h || '—';
+        elements.botTrades.textContent = stats.totalTrades ?? 0;
+        elements.botProfit.textContent = stats.profit || '—';
         elements.botSuccess.textContent = stats.successRate || '—';
         elements.botCycles.textContent = stats.opportunities ?? 0;
 
-        elements.metricProfit.textContent = stats.profitAbs24h || '—';
-        elements.metricTrades.textContent = stats.totalTrades24h ?? 0;
+        elements.metricProfit.textContent = stats.profit || '—';
+        elements.metricTrades.textContent = stats.totalTrades ?? 0;
         elements.metricSuccess.textContent = stats.successRate || '—';
         elements.metricOpportunities.textContent = stats.opportunities ?? 0;
-        elements.metricCycles.textContent = data.stale != null ? `${Math.round(data.stale / 1000)}s atrás` : '—';
+        elements.metricCycles.textContent = stats.updatedAt ? new Date(stats.updatedAt).toLocaleTimeString() : '—';
         elements.metricVolume.textContent = stats.pairs ?? '—';
     }
 
@@ -132,24 +132,25 @@ function updateDashboard(data) {
         if (data.marketData.length > 0) {
             elements.marketData.innerHTML = data.marketData.map(item => `
                 <div class="market-item">
-                    <span class="pair">[${item.dex}] ${item.pair}</span>
-                    <span class="price">${item.price}</span>
+                    <span class="pair">${item.pair}</span>
+                    <span class="price">lucro: ${item.price}%</span>
+                    <span class="change positive">${item.change} opp.</span>
                 </div>
             `).join('');
         } else {
             elements.marketData.innerHTML = `<div class="market-item"><span class="pair">Sem dados ainda — liga o bot principal (node index.js)</span></div>`;
         }
-        elements.marketCount.textContent = `${data.marketData.length} pares`;
+        elements.marketCount.textContent = `${data.marketData.length} pontos`;
     }
 
     // Trades reais
     if (data.trades) {
         if (data.trades.length > 0) {
             elements.tradesLog.innerHTML = data.trades.map(trade => `
-                <div class="trade-item ${trade.success ? 'green' : 'red'}">
+                <div class="trade-item ${trade.color}">
                     <span class="trade-time">${trade.time}</span>
-                    <span class="trade-icon">${trade.success ? '✅' : '❌'}</span>
-                    <span class="trade-text">[${trade.dex}] ${trade.path}${trade.profit ? ' ' + trade.profit : ''}${trade.error ? ' — ' + trade.error : ''}</span>
+                    <span class="trade-icon">${trade.icon}</span>
+                    <span class="trade-text">${trade.profit ? trade.profit + ' ' : ''}${trade.text}</span>
                 </div>
             `).join('');
         } else {
@@ -173,8 +174,7 @@ function renderProposals(proposals) {
                 <span class="thought-time">${new Date(p.ts).toLocaleString()}</span>
                 <span class="proposal-type">${p.type}</span>
             </div>
-            <span class="thought-text"><strong>${escapeHtml(p.title)}</strong></span>
-            <span class="thought-text proposal-desc">${escapeHtml(p.description || '')}</span>
+            <span class="thought-text">${escapeHtml(p.summary || '')}</span>
             <div class="proposal-actions">
                 <button class="approve-btn" data-id="${p.id}">✅ Aprovar</button>
                 <button class="reject-btn" data-id="${p.id}">❌ Rejeitar</button>
@@ -183,23 +183,24 @@ function renderProposals(proposals) {
     `).join('');
 
     elements.proposalsList.querySelectorAll('.approve-btn').forEach(btn => {
-        btn.addEventListener('click', () => decideProposal(btn.dataset.id, 'approved'));
+        btn.addEventListener('click', () => decideProposal(btn.dataset.id, 'approve'));
     });
     elements.proposalsList.querySelectorAll('.reject-btn').forEach(btn => {
-        btn.addEventListener('click', () => decideProposal(btn.dataset.id, 'rejected'));
+        btn.addEventListener('click', () => decideProposal(btn.dataset.id, 'reject'));
     });
 }
 
-async function decideProposal(id, decision) {
+async function decideProposal(id, action) {
     try {
-        const res = await fetch(`${API_URL}/api/proposals/${id}/decide`, {
+        const res = await fetch(`${API_URL}/api/proposals/${id}/${action}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ decision }),
+            body: JSON.stringify({}),
         });
         const data = await res.json();
         if (data.success) {
-            addConsoleLine(`${decision === 'approved' ? '✅' : '❌'} Proposta ${decision === 'approved' ? 'aprovada' : 'rejeitada'}.`, 'system');
+            addConsoleLine(`${action === 'approve' ? '✅ Proposta aprovada e aplicada.' : '❌ Proposta rejeitada.'}`, 'system');
+            fetch(`${API_URL}/api/dashboard`).then(r => r.json()).then(d => { if (d.success) updateDashboard(d.data); });
         } else {
             addConsoleLine(`❌ Erro: ${data.error}`, 'error');
         }

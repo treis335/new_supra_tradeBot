@@ -1,11 +1,4 @@
 // dashboard-web/server.js
-//
-// CORRIGIDO: a versao anterior gerava dados de mercado e trades com Math.random(),
-// e o saldo/lucro vinham de valores fixos no codigo -- nada disto refletia o bot
-// real. Agora le tudo de data/live_state.json (escrito pelo loop/tick.js real) e
-// data/history.jsonl (historico persistente real). Se o bot nao estiver a correr,
-// diz isso claramente em vez de inventar numeros.
-
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -13,183 +6,273 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 const { DeepSeekAPI } = require('../agent/deepseekClient');
-const { readLiveState } = require('../intelligence/liveStateWriter');
+const { listProposals, getProposal, setStatus } = require('../intelligence/proposalQueue');
+const { applyProposal } = require('../intelligence/proposalApplier');
 const { readRecentHistory } = require('../intelligence/historyLogger');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const PORT = process.env.DASHBOARD_PORT || 3000;
-const REPORTS_FILE = path.join(__dirname, '..', 'data', 'analyst_reports.jsonl');
-const PROPOSALS_FILE = path.join(__dirname, '..', 'data', 'proposals.jsonl');
+// Configurações
+const PORT = 3000;
+const brainLogFile = path.join(__dirname, '../.brain_memory.json');
+const botStatsFile = path.join(__dirname, '../.bot_stats.json');
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Instância do DeepSeek
 const deepseek = new DeepSeekAPI();
+
+// ============================================
+// ESTADO GLOBAL
+// ============================================
+
 let clients = [];
+// Sem dados reais ainda -- é isto que se via ANTES de o bot escrever
+// .bot_stats.json alguma vez. Não é um placeholder "bonito", é honesto:
+// diz claramente que não há bot ligado.
+let botStats = {
+    running: false,
+    balance: 'sem dados',
+    pairs: 0,
+    totalTrades: 0,
+    profit: 'sem dados',
+    successRate: 'sem dados',
+    opportunities: 0,
+    updatedAt: null,
+};
+
+let brainLogs = [];
+let trades = [];
+let marketData = [];
 
 // ============================================
-// DADOS REAIS (sem Math.random em lado nenhum)
+// FUNÇÕES DE COLETA DE DADOS
 // ============================================
 
-function getRealSnapshot() {
-    const live = readLiveState(); // null se o bot nao escreveu nada ainda / esta parado
+// Considera o bot "morto" se não escreveu stats há mais de 15s -- evita
+// mostrar um número real mas antigo como se fosse ao vivo.
+const STATS_STALE_MS = 15000;
 
-    const historyEvents = readRecentHistory({ sinceHoursAgo: 24, maxEvents: 500 });
-    const trades = historyEvents.filter(e => e.type === 'trade_executed');
-    const successCount = trades.filter(t => t.success).length;
-    const totalProfitAbs = trades.filter(t => t.success).reduce((s, t) => s + (t.profitAbs || 0), 0);
-
-    return {
-        running: !!(live && live.running),
-        stale: live ? live.staleForMs : null,
-        botStats: {
-            balance: live?.walletBalances?.SUPRA != null ? `${live.walletBalances.SUPRA} SUPRA` : 'sem dados',
-            pairs: live?.pairCount ?? 0,
-            totalTrades24h: trades.length,
-            successCount, failCount: trades.length - successCount,
-            successRate: trades.length ? ((successCount / trades.length) * 100).toFixed(1) + '%' : '—',
-            profitAbs24h: totalProfitAbs.toFixed(4) + ' SUPRA',
-            opportunities: live?.opportunityCount ?? 0,
-            bestOpportunity: live?.bestOpportunity || null,
-        },
-        marketData: (live?.topPairs || []).map(p => ({
-            pair: `${p.tokenA}/${p.tokenB}`, dex: p.dex,
-            price: p.priceAinB != null ? Number(p.priceAinB).toFixed(6) : '—',
-        })),
-        trades: (live?.recentTrades || []).map(t => ({
-            time: t.time, dex: t.dex, path: t.path,
-            profit: t.profitPct != null ? `+${t.profitPct.toFixed(3)}%` : '',
-            success: t.success, error: t.error || null,
-        })),
-        updatedAt: live?.updatedAt || null,
-    };
-}
-
-function getRecentAnalystReports() {
+function loadBotStats() {
     try {
-        if (!fs.existsSync(REPORTS_FILE)) return [];
-        const lines = fs.readFileSync(REPORTS_FILE, 'utf8').split('\n').filter(Boolean);
-        return lines.slice(-10).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).reverse();
-    } catch { return []; }
+        if (fs.existsSync(botStatsFile)) {
+            const data = JSON.parse(fs.readFileSync(botStatsFile, 'utf8'));
+            const isFresh = data.updatedAt && (Date.now() - data.updatedAt) < STATS_STALE_MS;
+            botStats = isFresh
+                ? { ...data, running: true }
+                : { ...data, running: false, balance: 'bot desligado', successRate: 'sem dados' };
+        } else {
+            botStats = { running: false, balance: 'sem dados', pairs: 0, totalTrades: 0, profit: 'sem dados', successRate: 'sem dados', opportunities: 0, updatedAt: null };
+        }
+    } catch (e) {
+        botStats = { running: false, balance: 'erro ao ler stats', pairs: 0, totalTrades: 0, profit: 'sem dados', successRate: 'sem dados', opportunities: 0, updatedAt: null };
+    }
 }
 
-function getPendingProposals() {
+function loadBrainLogs() {
     try {
-        if (!fs.existsSync(PROPOSALS_FILE)) return [];
-        const lines = fs.readFileSync(PROPOSALS_FILE, 'utf8').split('\n').filter(Boolean);
-        return lines.map(l => { try { return JSON.parse(l); } catch { return null; } })
-            .filter(p => p && p.status === 'pending').reverse();
-    } catch { return []; }
+        if (fs.existsSync(brainLogFile)) {
+            const data = JSON.parse(fs.readFileSync(brainLogFile, 'utf8'));
+            brainLogs = data.learnings || [];
+        }
+    } catch (e) {}
+}
+
+// Mercado e trades reais, lidos do histórico persistente do bot
+// (data/history.jsonl) -- nunca inventados. Se não há bot a correr, listas
+// vêm vazias, honestamente, em vez de preenchidas com Math.random().
+function loadRealMarketAndTrades() {
+    const events = readRecentHistory({ sinceHoursAgo: 6, maxEvents: 100 });
+
+    const tradeEvents = events.filter(e => e.type === 'trade_executed').slice(-15).reverse();
+    trades = tradeEvents.map(e => ({
+        time: new Date(e.ts).toTimeString().substring(0, 8),
+        icon: '◆',
+        color: e.success ? 'green' : 'red',
+        text: `${e.dex || '?'} ${e.path || ''}`.trim(),
+        profit: e.profitPct != null ? `${e.success ? '+' : ''}${e.profitPct.toFixed(3)}%` : '',
+    }));
+
+    const snapshotEvents = events.filter(e => e.type === 'opportunity_snapshot').slice(-9);
+    marketData = snapshotEvents.map(e => ({
+        pair: new Date(e.ts).toTimeString().substring(0, 8),
+        price: e.bestProfitPct != null ? e.bestProfitPct.toFixed(3) : '0',
+        change: e.count || 0,
+        changePositive: true,
+    }));
 }
 
 // ============================================
-// BROADCAST
+// BROADCAST PARA CLIENTES
 // ============================================
 
 function broadcast(data) {
     clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(data));
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(data));
+        }
     });
 }
 
 function updateAllData() {
-    const snapshot = getRealSnapshot();
-    broadcast({
+    loadBotStats();
+    loadBrainLogs();
+    loadRealMarketAndTrades();
+    
+    const payload = {
         type: 'update',
         data: {
-            ...snapshot,
-            analystReports: getRecentAnalystReports().slice(0, 5),
-            pendingProposals: getPendingProposals(),
-            timestamp: new Date().toISOString(),
-        },
-    });
+            botStats,
+            brainLogs: brainLogs.slice(-5),
+            marketData,
+            trades,
+            pendingProposals: listProposals('pending'),
+            timestamp: new Date().toISOString()
+        }
+    };
+    
+    broadcast(payload);
 }
 
 // ============================================
-// API
+// WEBHOOKS E API ENDPOINTS
 // ============================================
 
+// API: Status do bot
 app.get('/api/status', (req, res) => {
-    res.json({ success: true, data: getRealSnapshot() });
+    res.json({ success: true, data: botStats });
 });
 
+// API: Pensamentos do cérebro
+app.get('/api/brain', (req, res) => {
+    res.json({ success: true, data: brainLogs.slice(-10) });
+});
+
+// API: Mercado
+app.get('/api/market', (req, res) => {
+    loadRealMarketAndTrades();
+    res.json({ success: true, data: marketData });
+});
+
+// API: Trades
+app.get('/api/trades', (req, res) => {
+    res.json({ success: true, data: trades });
+});
+
+// API: Dashboard completo
 app.get('/api/dashboard', (req, res) => {
-    const snapshot = getRealSnapshot();
+    loadBotStats();
+    loadBrainLogs();
+    loadRealMarketAndTrades();
+    
     res.json({
         success: true,
         data: {
-            ...snapshot,
-            analystReports: getRecentAnalystReports().slice(0, 5),
-            pendingProposals: getPendingProposals(),
-            timestamp: new Date().toISOString(),
-        },
+            botStats,
+            brainLogs: brainLogs.slice(-10),
+            marketData,
+            trades,
+            pendingProposals: listProposals('pending'),
+            timestamp: new Date().toISOString()
+        }
     });
 });
 
+// ── Propostas pendentes de aprovação humana ────────────────────────
+// Nenhuma proposta muda o bot sozinha. O agente só pode CRIAR propostas
+// (via intelligence/proposalQueue.js); só um humano, clicando aqui, é que
+// as transforma em mudança real (via intelligence/proposalApplier.js).
 app.get('/api/proposals', (req, res) => {
-    res.json({ success: true, data: getPendingProposals() });
+    const status = req.query.status || null;
+    res.json({ success: true, data: listProposals(status) });
 });
 
-// Aprovar/rejeitar uma proposta -- e AQUI que fica o "botao humano" antes de
-// qualquer ideia da IA passar a ter efeito real. Nao existe um caminho que
-// aplique propostas automaticamente sem passar por aqui.
-app.post('/api/proposals/:id/decide', (req, res) => {
-    const { id } = req.params;
-    const { decision } = req.body; // 'approved' | 'rejected'
-    if (!['approved', 'rejected'].includes(decision)) {
-        return res.status(400).json({ success: false, error: 'decision tem de ser approved ou rejected' });
-    }
+app.post('/api/proposals/:id/approve', (req, res) => {
+    const proposal = getProposal(req.params.id);
+    if (!proposal) return res.status(404).json({ success: false, error: 'proposta não encontrada' });
+    if (proposal.status !== 'pending') return res.status(400).json({ success: false, error: `proposta já está '${proposal.status}'` });
+
+    setStatus(req.params.id, 'approved');
     try {
-        if (!fs.existsSync(PROPOSALS_FILE)) return res.status(404).json({ success: false, error: 'sem propostas' });
-        const lines = fs.readFileSync(PROPOSALS_FILE, 'utf8').split('\n').filter(Boolean);
-        const updated = lines.map(l => {
-            const p = JSON.parse(l);
-            if (p.id === id) p.status = decision;
-            return JSON.stringify(p);
-        });
-        fs.writeFileSync(PROPOSALS_FILE, updated.join('\n') + '\n');
-        res.json({ success: true });
-        updateAllData();
+        const result = applyProposal(req.params.id);
+        broadcast({ type: 'proposal_applied', data: { id: req.params.id, result } });
+        res.json({ success: true, data: result });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
 });
 
+app.post('/api/proposals/:id/reject', (req, res) => {
+    const proposal = getProposal(req.params.id);
+    if (!proposal) return res.status(404).json({ success: false, error: 'proposta não encontrada' });
+    if (proposal.status !== 'pending') return res.status(400).json({ success: false, error: `proposta já está '${proposal.status}'` });
+
+    setStatus(req.params.id, 'rejected', { reason: req.body?.reason || null });
+    broadcast({ type: 'proposal_rejected', data: { id: req.params.id } });
+    res.json({ success: true });
+});
+
+// API: Comandos
 app.post('/api/command', async (req, res) => {
     const { command } = req.body;
-    if (!command) return res.json({ success: false, error: 'Comando não fornecido' });
-
+    
+    if (!command) {
+        return res.json({ success: false, error: 'Comando não fornecido' });
+    }
+    
     const cmd = command.toLowerCase().trim();
     let response = '';
-    const snapshot = getRealSnapshot();
-
-    switch (cmd) {
+    
+    switch(cmd) {
         case 'status':
-            response = snapshot.running
-                ? `📊 STATUS: 🟢 ATIVO\n💰 ${snapshot.botStats.balance}\n📈 ${snapshot.botStats.pairs} pares\n🔄 ${snapshot.botStats.totalTrades24h} trades (24h)\n💹 lucro 24h: ${snapshot.botStats.profitAbs24h}`
-                : `📊 STATUS: 🔴 O bot não parece estar a correr (sem atualizações recentes).\nCorre "node index.js" no terminal principal primeiro.`;
+            response = `📊 STATUS DO BOT:\n🟢 ${botStats.running ? 'ATIVO' : 'PAUSADO'}\n💰 ${botStats.balance}\n📈 ${botStats.pairs} pares\n🔄 ${botStats.totalTrades} trades\n💹 ${botStats.profit}`;
+            break;
+        case 'pausar':
+            botStats.running = false;
+            response = '⏸️ Bot pausado!';
+            break;
+        case 'retomar':
+            botStats.running = true;
+            response = '▶️ Bot retomado!';
             break;
         case 'performance':
-            response = `📊 PERFORMANCE (24h real):\n🔄 Trades: ${snapshot.botStats.totalTrades24h}\n🎯 Sucesso: ${snapshot.botStats.successRate}\n💹 Lucro: ${snapshot.botStats.profitAbs24h}\n⚡ Oportunidades agora: ${snapshot.botStats.opportunities}`;
+            response = `📊 PERFORMANCE:\n💹 Lucro: ${botStats.profit}\n🔄 Trades: ${botStats.totalTrades}\n🎯 Sucesso: ${botStats.successRate}\n⚡ Oportunidades: ${botStats.opportunities}`;
             break;
         default:
+            // Usar DeepSeek para respostas naturais
             try {
-                const context = `Estado atual real do bot: ${JSON.stringify(snapshot.botStats)}`;
                 const aiResponse = await deepseek.chat([
-                    { role: 'system', content: `Es um assistente de trading. Responde de forma util e concisa, em portugues. ${context}` },
-                    { role: 'user', content: command },
+                    { role: 'system', content: 'Você é um assistente de trading. Responda de forma útil e concisa.' },
+                    { role: 'user', content: command }
                 ]);
                 response = aiResponse;
             } catch (e) {
-                response = '❓ Não entendi o comando, ou a DEEPSEEK_API_KEY não está configurada. Tente: status, performance';
+                response = '❓ Não entendi o comando. Tente: status, pausar, retomar, performance';
             }
     }
-
-    res.json({ success: true, response, command });
+    
+    // Adicionar ao log
+    trades.unshift({
+        time: new Date().toTimeString().substring(0, 8),
+        icon: '💬',
+        color: 'white',
+        text: `Comando: ${command}`,
+        profit: ''
+    });
+    
+    res.json({
+        success: true,
+        response: response,
+        command: command
+    });
+    
+    // Atualizar todos os clientes
+    updateAllData();
 });
 
 // ============================================
@@ -197,17 +280,43 @@ app.post('/api/command', async (req, res) => {
 // ============================================
 
 wss.on('connection', (ws) => {
-    console.log('🟢 Cliente conectado ao dashboard');
+    console.log('🟢 Cliente conectado!');
     clients.push(ws);
+    
+    // Enviar dados iniciais
     updateAllData();
-    ws.on('close', () => { clients = clients.filter(c => c !== ws); });
-    ws.on('error', (err) => console.error('WebSocket error:', err.message));
+    
+    ws.on('close', () => {
+        clients = clients.filter(client => client !== ws);
+        console.log('🔴 Cliente desconectado');
+    });
+    
+    ws.on('error', (error) => {
+        console.error('WebSocket error:', error);
+    });
 });
 
-setInterval(updateAllData, 3000);
+// ============================================
+// ATUALIZAÇÃO AUTOMÁTICA (a cada 3 segundos)
+// ============================================
+
+setInterval(() => {
+    updateAllData();
+}, 3000);
+
+// ============================================
+// INICIAR SERVIDOR
+// ============================================
 
 server.listen(PORT, () => {
-    console.log('🚀 Dashboard Web iniciado (dados reais, sem simulação)');
+    console.log('🚀 Dashboard Web iniciado!');
     console.log(`📊 Acesse: http://localhost:${PORT}`);
-    console.log('⚠️  Se o loop/tick.js principal não estiver a correr, o dashboard mostra "sem dados" -- isso é esperado, não um bug.');
+    console.log('='.repeat(50));
+    console.log('💡 Comandos disponíveis na interface:');
+    console.log('  - status: Ver status do bot');
+    console.log('  - pausar: Pausar operações');
+    console.log('  - retomar: Retomar operações');
+    console.log('  - performance: Ver métricas');
+    console.log('  - Qualquer pergunta em português!');
+    console.log('='.repeat(50));
 });

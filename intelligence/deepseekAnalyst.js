@@ -14,7 +14,7 @@ const path = require('path');
 const { CONFIG } = require('../config/config');
 const { readRecentHistory, logEvent } = require('./historyLogger');
 const { logError } = require('../utils/logError');
-const { createProposal } = require('./proposalQueue');
+const { addProposal } = require('./proposalQueue');
 
 const REPORT_FILE = path.join(__dirname, '..', 'data', 'analyst_reports.jsonl');
 
@@ -113,29 +113,40 @@ Se successRate for baixa (<50%), considera SUBIR os limiares de lucro minimo (me
         const result = await callDeepSeek(systemPrompt, userPrompt);
         if (!result) return { skipped: true, reason: 'DEEPSEEK_API_KEY nao configurada' };
 
-        const applied = {};
-        for (const [key, bounds] of Object.entries(SAFE_BOUNDS)) {
+        // Alinhado com o design do proposalQueue/proposalApplier: NADA se aplica
+        // sozinho, mesmo dentro de limites seguros. Cria uma proposta "config_adjust"
+        // e fica a aguardar aprovacao no dashboard -- os limites de SAFE_BOUNDS sao
+        // reaplicados no momento de aprovar (proposalApplier.js), como defesa extra.
+        const suggestedChanges = {};
+        for (const key of Object.keys(SAFE_BOUNDS)) {
             const suggested = result.suggestions?.[key];
             if (suggested === null || suggested === undefined) continue;
-            const clamped = clamp(Number(suggested), bounds);
-            if (clamped !== CONFIG.autoExecute[key]) {
-                applied[key] = { from: CONFIG.autoExecute[key], to: clamped };
-                CONFIG.autoExecute[key] = clamped;
-            }
+            if (Number(suggested) !== CONFIG.autoExecute[key]) suggestedChanges[key] = Number(suggested);
+        }
+
+        let proposal = null;
+        if (Object.keys(suggestedChanges).length > 0) {
+            proposal = addProposal({
+                type: 'config_adjust',
+                summary: `Analista sugere ajustar: ${Object.entries(suggestedChanges).map(([k, v]) => `${k}=${v}`).join(', ')} — "${result.reasoning}"`,
+                payload: suggestedChanges,
+                source: 'deepseekAnalyst.analyzePerformance',
+            });
         }
 
         const reportEntry = {
             ts: Date.now(), type: 'performance_analysis',
-            summary, reasoning: result.reasoning, confidence: result.confidence, applied,
+            summary, reasoning: result.reasoning, confidence: result.confidence,
+            proposalId: proposal?.id || null,
         };
         fs.appendFileSync(REPORT_FILE, JSON.stringify(reportEntry) + '\n');
-        logEvent('analyst_config_change', { applied, reasoning: result.reasoning });
+        logEvent('analyst_suggestion', { suggestedChanges, reasoning: result.reasoning });
 
-        if (Object.keys(applied).length > 0) {
-            log(`{cyan-fg}🧠 Analista: ${Object.keys(applied).length} parametro(s) ajustado(s). "${result.reasoning}"{/}`);
+        if (proposal) {
+            log(`{cyan-fg}🧠 Analista: proposta nova no dashboard (${Object.keys(suggestedChanges).length} parâmetro(s)). "${result.reasoning}"{/}`);
         }
 
-        return { applied, reasoning: result.reasoning };
+        return { proposal, reasoning: result.reasoning };
     } catch (e) {
         logError('deepseekAnalyst.analyzePerformance', e);
         return { error: e.message };
@@ -228,11 +239,11 @@ Snapshots de mercado completo capturados: ${marketSnapshots.length}`;
         // Cada sugestao vira uma proposta "idea" -- fica so para leres, sem efeito
         // automatico nenhum no bot.
         for (const s of (result.suggestions || [])) {
-            createProposal({
+            addProposal({
                 type: 'idea',
-                title: s.idea,
-                description: `${s.reasoning} (prioridade: ${s.priority})`,
+                summary: `${s.idea} — ${s.reasoning} (prioridade: ${s.priority})`,
                 payload: s,
+                source: 'deepseekAnalyst.generateCapabilityReport',
             });
         }
 
