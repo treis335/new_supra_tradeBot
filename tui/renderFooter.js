@@ -7,7 +7,6 @@ function setRpcHealthy(val) { rpcHealthy = val; }
 
 function renderFooter(opps, tickMs, boxes) {
     const { footerBox } = boxes;
-    const now = new Date().toLocaleTimeString('pt-PT');
     const best = opps[0];
     const bestStr = best
         ? `{bright-green-fg}▲ +${best.result.profitPct.toFixed(2)}% sc:${best.score}{/}`
@@ -17,7 +16,8 @@ function renderFooter(opps, tickMs, boxes) {
     const err = getErrorCount() > 0 ? `{red-fg}⚠${getErrorCount()}{/}` : '';
 
     footerBox.setContent(
-        `{grey-fg}─{/} ${auto} ${bestStr} ${rpcIcon} t:${tickMs}ms ${err} {grey-fg}a:e:q{/}`
+        `{grey-fg}─{/} ${auto} ${bestStr} ${rpcIcon} t:${tickMs}ms ${err}\n` +
+        `{grey-fg}tab: mudar painel · e: executar manual · a: auto on/off · c: guardar snapshot · q: sair{/}`
     );
 }
 

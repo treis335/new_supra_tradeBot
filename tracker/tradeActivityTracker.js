@@ -63,6 +63,7 @@ function trackActivity(pairStates) {
 
         activityLog.unshift({
             time: now,
+            ts: Date.now(),
             type: 'trade',
             text: `{grey-fg}${now}{/} {magenta-fg}[${dexLabel}]{/} ${action} {grey-fg}${ps.tokenA}/${ps.tokenB}{/}`,
         });

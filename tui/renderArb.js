@@ -23,7 +23,7 @@ function renderArb(opps, boxes) {
     L.push('{grey-fg}  Sem oportunidades acima de ' + CONFIG.minProfitPct + '%{/}');
   } else {
     let totalSupraProfit = 0;
-    for (const { cycle, result, optimalAmount, score, profitScore, liquidityScore, trendScore } of opps) {
+    opps.forEach(({ cycle, result, optimalAmount, score, profitScore, liquidityScore, trendScore }, idx) => {
       const { profitPct, profitAbs, steps } = result;
       const symIn = CONFIG.tokens[cycle.path[0]]?.symbol || cycle.path[0];
       if (symIn === 'SUPRA') totalSupraProfit += profitAbs;
@@ -32,41 +32,45 @@ function renderArb(opps, boxes) {
       const badge = isHot ? '{green-bg}{black-fg} 🔥 EXEC {/}' : isWarm ? '{yellow-fg} ◈ AVAL  {/}' : '{grey-fg} ○ FRACO {/}';
       const pc = isHot ? 'bright-green' : isWarm ? 'yellow' : 'grey';
 
+      // Rota compacta (sempre mostrada)
+      const pathParts = cycle.path.map((token, i) => {
+        const sym = CONFIG.tokens[token]?.symbol || token;
+        if (i === 0) return sym;
+        const dexLabel = getDexLabel(cycle.edges[i - 1].pair.dex);
+        return `[${dexLabel}]→${sym}`;
+      });
+
       L.push(
         ` ${badge} {${pc}-fg}+${profitPct.toFixed(3)}%  +${profitAbs.toFixed(3)} ${symIn}{/}` +
-        `  {grey-fg}opt:${optimalAmount.toFixed(0)} ${symIn}{/}`
+        `  {grey-fg}${pathParts.join(' ')}{/}`
       );
 
-      L.push(
-        `  ${scoreBar(score)} {grey-fg}P:${(profitScore * 100).toFixed(0)}% L:${(liquidityScore * 100).toFixed(0)}% T:${(trendScore * 100).toFixed(0)}%{/}`
-      );
-
-      // Rota com DEX labels
-      const pathParts = cycle.path.map((token, idx) => {
-        const sym = CONFIG.tokens[token]?.symbol || token;
-        if (idx === 0) return sym;
-        const prevEdge = cycle.edges[idx - 1];
-        const dexLabel = getDexLabel(prevEdge.pair.dex);
-        return `{grey-fg}[${dexLabel}]{/} → ${sym}`;
-      });
-      L.push(`  {grey-fg}Rota: {/}${pathParts.join(' ')}`);
-
-      // Passos individuais
-      for (let i = 0; i < steps.length; i++) {
-        const s = steps[i];
-        const fA = CONFIG.tokens[s.from]?.symbol || s.from;
-        const fB = CONFIG.tokens[s.to]?.symbol || s.to;
-        const dexLabel = getDexLabel(s.dex);
-        const co = i === steps.length - 1 ? '└' : '├';
+      // Detalhe completo (score breakdown + passos) so na #1 -- as restantes
+      // ficam so na linha compacta acima, para o painel nao ficar cheio de
+      // repeticao quase identica quando ha varias oportunidades parecidas.
+      if (idx === 0) {
         L.push(
-          `  {grey-fg}${co} ${fA} → ${fB} {/}[{magenta-fg}${dexLabel}{/}]` +
-          `  {grey-fg}in:{/}{${pc}-fg}${s.amtIn.toFixed(6)}{/}` +
-          `  {grey-fg}out:{/}{${pc}-fg}${s.amtOut.toFixed(6)}{/}`
+          `  ${scoreBar(score)} {grey-fg}P:${(profitScore * 100).toFixed(0)}% L:${(liquidityScore * 100).toFixed(0)}% T:${(trendScore * 100).toFixed(0)}%{/}` +
+          ` {grey-fg}opt:${optimalAmount.toFixed(0)} ${symIn}{/}`
         );
+        for (let i = 0; i < steps.length; i++) {
+          const s = steps[i];
+          const fA = CONFIG.tokens[s.from]?.symbol || s.from;
+          const fB = CONFIG.tokens[s.to]?.symbol || s.to;
+          const dexLabel = getDexLabel(s.dex);
+          const co = i === steps.length - 1 ? '└' : '├';
+          L.push(
+            `  {grey-fg}${co} ${fA} → ${fB} {/}[{magenta-fg}${dexLabel}{/}]` +
+            `  {grey-fg}in:{/}{${pc}-fg}${s.amtIn.toFixed(6)}{/}` +
+            `  {grey-fg}out:{/}{${pc}-fg}${s.amtOut.toFixed(6)}{/}`
+          );
+        }
+        L.push('{grey-fg}  ' + '─'.repeat(38) + '{/}');
       }
-      L.push('{grey-fg}  ' + '─'.repeat(38) + '{/}');
+    });
+    if (totalSupraProfit > 0) {
+      L.unshift(`{yellow-fg}{bold}  💰 Total estimado: ${totalSupraProfit.toFixed(3)} SUPRA{/} {grey-fg}(${opps.length} oportunidades, detalhe completo so na #1){/}`, '');
     }
-    if (totalSupraProfit > 0) L.unshift(`{yellow-fg}{bold}  💰 Total estimado: ${totalSupraProfit.toFixed(3)} SUPRA{/}`, '');
   }
   arbBox.setContent(L.join('\n'));
   if (!boxes.scrollPaused()) arbBox.scrollTo(0);

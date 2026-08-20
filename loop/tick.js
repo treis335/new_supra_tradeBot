@@ -97,8 +97,7 @@ async function maybeAutoExecute(opps, balances, boxes) {
   lastAutoTxTime = now;
 
   const log = (msg) => {
-    boxes.footerBox.setContent(msg);
-    boxes.screen.render();
+    require('../tui/systemLog').pushSystemLog(msg);
   };
 
   const maxPerTick = cfg.maxTradesPerTick || 2;
@@ -161,12 +160,7 @@ async function tick(boxes) {
 
   const DISCOVERY_EVERY_N_TICKS = 30;
   if (tickCounter % DISCOVERY_EVERY_N_TICKS === 0) {
-    discoverNewPools((msg) => {
-      if (boxes?.footerBox) {
-        boxes.footerBox.setContent(msg);
-        boxes.screen.render();
-      }
-    })
+    discoverNewPools((msg) => require('../tui/systemLog').pushSystemLog(msg))
       .then((res) => {
         if (res && res.added > 0) logEvent('pools_discovered', { count: res.added });
       })
@@ -175,12 +169,8 @@ async function tick(boxes) {
 
   const ANALYST_EVERY_N_TICKS = Math.floor((2 * 3600 * 1000) / (CONFIG.pollingMs || 3000));
   if (tickCounter % ANALYST_EVERY_N_TICKS === 0) {
-    analyzePerformance((msg) => {
-      if (boxes?.footerBox) {
-        boxes.footerBox.setContent(msg);
-        boxes.screen.render();
-      }
-    }).catch((e) => logError('analyzePerformance', e));
+    analyzePerformance((msg) => require('../tui/systemLog').pushSystemLog(msg))
+      .catch((e) => logError('analyzePerformance', e));
   }
 
   const tasks = [];
