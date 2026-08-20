@@ -106,9 +106,19 @@ function applyCodeChange(payload) {
 
     // Normaliza e confirma que o caminho fica DENTRO de uma pasta permitida,
     // sem ../ para escapar, sem caminho absoluto.
+    // NOTA (bug corrigido): antes comparava so o 1o segmento do caminho
+    // (ex: "intelligence" de "intelligence/generated/x.js") contra a lista
+    // ALLOWED_CODE_DIRS que tem entradas compostas ("intelligence/generated").
+    // Isso fazia "intelligence/generated" nunca corresponder a nada -- SEMPRE
+    // rejeitava ficheiros nessa pasta, mesmo estando na allowlist. Agora
+    // compara o caminho inteiro (normalizado com "/") contra cada entrada
+    // permitida, aceitando tanto a pasta exata como qualquer coisa dentro dela.
     const normalized = path.normalize(targetPath).replace(/^(\.\.[/\\])+/, '');
-    const dirPart = normalized.split(/[/\\]/)[0];
-    if (path.isAbsolute(targetPath) || normalized.includes('..') || !ALLOWED_CODE_DIRS.includes(dirPart)) {
+    const normalizedForwardSlash = normalized.split(path.sep).join('/');
+    const isInAllowedDir = ALLOWED_CODE_DIRS.some(dir =>
+        normalizedForwardSlash === dir || normalizedForwardSlash.startsWith(dir + '/')
+    );
+    if (path.isAbsolute(targetPath) || normalized.includes('..') || !isInAllowedDir) {
         throw new Error(`targetPath "${targetPath}" não está numa pasta permitida (${ALLOWED_CODE_DIRS.join(', ')})`);
     }
 
