@@ -3,52 +3,35 @@
 
 const CONFIG = {
   rpc: 'https://rpc-mainnet.supra.com',
-
-  // ─── Loop / RPC ───
-  // 3000ms + maxConcurrent 4 = menos pressão no RPC e ticks mais estáveis
   pollingMs: 3000,
   maxConcurrent: 4,
   viewTimeout: 12000,
   viewRetries: 3,
-
-  // ─── Detecção de oportunidades ───
-  // minProfitPct baixo para o detector VER triangulares pequenos;
-  // a execução automática usa o threshold mais alto em autoExecute.
   minProfitPct: 0.12,
   emaAlpha: 0.35,
   tickHistory: 12,
   arbLogMax: 8,
-
-  // Tamanho ótimo da trade (ternary search)
   optimalSearch: { min: 10, max: 10000, iterations: 20 },
-
-  // Scoring: lucro manda, liquidez protege, trend ajuda
   scoreWeights: { profit: 0.55, liquidity: 0.30, trend: 0.15 },
 
-  // ─── Auto-execução ───
   autoExecute: {
     enabled: true,
-    // Só executa se o lucro estimado for realista e suficiente
-    minProfitPct: 0.30,          // triangular limpo
+    minProfitPct: 0.30,
     minScore: 22,
-    gasReserveSUPRA: 0.15,       // reserva um pouco maior (carteira grande)
-    cooldownMs: 2000,            // evita spam de txs
+    gasReserveSUPRA: 0.15,
+    cooldownMs: 2000,
     maxTradesPerTick: 2,
     maxConsecutiveFails: 3,
-    // Cross-DEX NÃO é atómico — exige margem extra
     crossDexMinProfitPct: 2.0,
-    // Teto de segurança: % acima disto é tratado como bug de simulação
     maxRealisticProfitPct: 50,
   },
 
-  // ─── Preferência de rotas (usado pelo Hunter) ───
   routePreference: {
-    preferTriangular: true,      // 3 hops = prioridade
+    preferTriangular: true,
     maxHops: 4,
     minHops: 2,
-    triangularBoost: 1.12,       // +12% no score de ciclos de 3 hops
+    triangularBoost: 1.12,
   },
-
   v3Pools: {
     moduleAddress: '0xc3a610069fa7545cf14e266e849954bf385aca957bb489b1dc069a4baa29b502',
     pools: [

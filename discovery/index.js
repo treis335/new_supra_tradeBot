@@ -4,18 +4,26 @@ const graph = require('./dynamicGraph');
 const scanner = require('./poolScanner');
 
 let discoveryInterval = null;
+let scanning = false;
 
-function startDiscoveryLoop(intervalMs = 25000) {
+function startDiscoveryLoop(intervalMs = 60000) {
   if (discoveryInterval) return;
 
   console.log(`[Discovery] Loop autónomo iniciado (a cada ${intervalMs / 1000}s)`);
 
-  // Primeiro scan imediato
-  scanner.runDiscoveryScan().catch(e => console.error('[Discovery] Erro no scan inicial:', e.message));
+  const run = () => {
+    if (scanning) return;
+    scanning = true;
+    scanner
+      .runDiscoveryScan()
+      .catch((e) => console.error('[Discovery] Erro no scan:', e.message))
+      .finally(() => {
+        scanning = false;
+      });
+  };
 
-  discoveryInterval = setInterval(() => {
-    scanner.runDiscoveryScan().catch(e => console.error('[Discovery] Erro no scan:', e.message));
-  }, intervalMs);
+  run();
+  discoveryInterval = setInterval(run, intervalMs);
 }
 
 function stopDiscoveryLoop() {

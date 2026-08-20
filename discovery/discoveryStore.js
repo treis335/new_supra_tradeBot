@@ -1,5 +1,5 @@
 // discovery/discoveryStore.js
-// Persistência simples e fiável de pools descobertos (dados reais)
+// Persistência atómica de pools descobertos (evita "Unexpected end of JSON input")
 
 const fs = require('fs');
 const path = require('path');
@@ -12,51 +12,69 @@ function ensureDir() {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-function loadPools() {
+function atomicWrite(filePath, data) {
   ensureDir();
+  const tmp = filePath + '.tmp';
+  const json = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  fs.writeFileSync(tmp, json, 'utf8');
   try {
-    if (!fs.existsSync(STORE_PATH)) return [];
-    const raw = fs.readFileSync(STORE_PATH, 'utf8');
-    return JSON.parse(raw);
+    fs.renameSync(tmp, filePath);
   } catch (e) {
-    console.error('[DiscoveryStore] Erro a carregar pools:', e.message);
-    return [];
+    // Windows: se rename falhar, tenta overwrite
+    try {
+      fs.writeFileSync(filePath, json, 'utf8');
+      try { fs.unlinkSync(tmp); } catch {}
+    } catch (e2) {
+      console.error('[DiscoveryStore] Erro a gravar:', e2.message);
+    }
   }
 }
 
-function savePools(pools) {
-  ensureDir();
+function safeParse(filePath, fallback) {
   try {
-    fs.writeFileSync(STORE_PATH, JSON.stringify(pools, null, 2), 'utf8');
+    if (!fs.existsSync(filePath)) return fallback;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    if (!raw || !raw.trim()) return fallback;
+    return JSON.parse(raw);
   } catch (e) {
-    console.error('[DiscoveryStore] Erro a guardar pools:', e.message);
+    console.error('[DiscoveryStore] JSON inválido em', path.basename(filePath), '—', e.message);
+    // Backup do ficheiro partido
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.renameSync(filePath, filePath + '.corrupt.' + Date.now());
+      }
+    } catch {}
+    return fallback;
   }
+}
+
+function loadPools() {
+  ensureDir();
+  const data = safeParse(STORE_PATH, []);
+  return Array.isArray(data) ? data : [];
+}
+
+function savePools(pools) {
+  atomicWrite(STORE_PATH, Array.isArray(pools) ? pools : []);
 }
 
 function loadGraph() {
   ensureDir();
-  try {
-    if (!fs.existsSync(GRAPH_PATH)) return { nodes: {}, edges: [], updatedAt: null };
-    return JSON.parse(fs.readFileSync(GRAPH_PATH, 'utf8'));
-  } catch {
-    return { nodes: {}, edges: [], updatedAt: null };
-  }
+  return safeParse(GRAPH_PATH, { nodes: {}, edges: [], updatedAt: null });
 }
 
 function saveGraph(graph) {
-  ensureDir();
-  try {
-    graph.updatedAt = new Date().toISOString();
-    fs.writeFileSync(GRAPH_PATH, JSON.stringify(graph, null, 2), 'utf8');
-  } catch (e) {
-    console.error('[DiscoveryStore] Erro a guardar grafo:', e.message);
-  }
+  const g = graph || { nodes: {}, edges: [] };
+  g.updatedAt = new Date().toISOString();
+  atomicWrite(GRAPH_PATH, g);
 }
 
 function upsertPool(pool) {
   const pools = loadPools();
   const key = `${pool.dex}:${pool.address}`.toLowerCase();
-  const idx = pools.findIndex(p => `${p.dex}:${p.address}`.toLowerCase() === key);
+  const idx = pools.findIndex(
+    (p) => `${p.dex}:${p.address}`.toLowerCase() === key
+  );
 
   const entry = {
     ...pool,

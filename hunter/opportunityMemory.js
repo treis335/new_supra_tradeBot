@@ -1,40 +1,66 @@
 // hunter/opportunityMemory.js
-// Memória real de oportunidades de arbitragem (só dados observados)
+// Memória real de oportunidades — escrita atómica
 
 const fs = require('fs');
 const path = require('path');
 
 const MEM_PATH = path.join(__dirname, '..', 'data', 'opportunity_memory.json');
-const MAX_ENTRIES = 5000; // evita ficheiro infinito
+const MAX_ENTRIES = 5000;
 
 function ensureDir() {
   const dir = path.dirname(MEM_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
+function atomicWrite(filePath, obj) {
+  ensureDir();
+  const tmp = filePath + '.tmp';
+  const json = JSON.stringify(obj, null, 2);
+  fs.writeFileSync(tmp, json, 'utf8');
+  try {
+    fs.renameSync(tmp, filePath);
+  } catch {
+    fs.writeFileSync(filePath, json, 'utf8');
+    try { fs.unlinkSync(tmp); } catch {}
+  }
+}
+
 function loadMemory() {
   ensureDir();
   try {
     if (!fs.existsSync(MEM_PATH)) return { entries: [], stats: {} };
-    return JSON.parse(fs.readFileSync(MEM_PATH, 'utf8'));
-  } catch {
+    const raw = fs.readFileSync(MEM_PATH, 'utf8');
+    if (!raw || !raw.trim()) return { entries: [], stats: {} };
+    const data = JSON.parse(raw);
+    return {
+      entries: Array.isArray(data.entries) ? data.entries : [],
+      stats: data.stats || {},
+    };
+  } catch (e) {
+    console.error('[OpportunityMemory] JSON inválido — a recomeçar:', e.message);
+    try {
+      if (fs.existsSync(MEM_PATH)) {
+        fs.renameSync(MEM_PATH, MEM_PATH + '.corrupt.' + Date.now());
+      }
+    } catch {}
     return { entries: [], stats: {} };
   }
 }
 
 function saveMemory(mem) {
-  ensureDir();
-  // Manter só as mais recentes
   if (mem.entries.length > MAX_ENTRIES) {
     mem.entries = mem.entries.slice(-MAX_ENTRIES);
   }
-  fs.writeFileSync(MEM_PATH, JSON.stringify(mem, null, 2), 'utf8');
+  atomicWrite(MEM_PATH, mem);
 }
 
 function recordOpportunity(opp) {
   const mem = loadMemory();
   const pathKey = (opp.cycle?.path || []).join('→');
-  const dexes = [...new Set((opp.result?.steps || []).map(s => s.dex))].sort().join('+');
+  const dexes = [...new Set((opp.result?.steps || []).map((s) => s.dex))]
+    .filter(Boolean)
+    .sort()
+    .join('+');
 
   const entry = {
     ts: new Date().toISOString(),
@@ -47,13 +73,20 @@ function recordOpportunity(opp) {
     hops: (opp.cycle?.path?.length || 1) - 1,
   };
 
+  // Não gravar % impossíveis
+  if (entry.profitPct > 50) return entry;
+
   mem.entries.push(entry);
 
-  // Stats agregadas por rota e por combo de DEX
   if (!mem.stats.byPath) mem.stats.byPath = {};
   if (!mem.stats.byDex) mem.stats.byDex = {};
 
-  const p = mem.stats.byPath[pathKey] || { count: 0, sumProfit: 0, maxProfit: 0, lastSeen: null };
+  const p = mem.stats.byPath[pathKey] || {
+    count: 0,
+    sumProfit: 0,
+    maxProfit: 0,
+    lastSeen: null,
+  };
   p.count++;
   p.sumProfit += entry.profitPct;
   p.maxProfit = Math.max(p.maxProfit, entry.profitPct);
@@ -74,15 +107,16 @@ function recordOpportunity(opp) {
 
 function getHotRoutes(minCount = 3) {
   const mem = loadMemory();
-  const paths = Object.entries(mem.stats.byPath || {})
-    .filter(([, s]) => s.count >= minCount)
-    .sort((a, b) => b[1].avgProfit - a[1].avgProfit);
-  return paths.map(([path, s]) => ({ path, ...s }));
+  return Object.entries(mem.stats.byPath || {})
+    .filter(([, s]) => s.count >= minCount && s.avgProfit <= 50)
+    .sort((a, b) => b[1].avgProfit - a[1].avgProfit)
+    .map(([path, s]) => ({ path, ...s }));
 }
 
 function getDexPerformance() {
   const mem = loadMemory();
   return Object.entries(mem.stats.byDex || {})
+    .filter(([, s]) => s.avgProfit <= 50)
     .map(([dexes, s]) => ({ dexes, ...s }))
     .sort((a, b) => b.avgProfit - a.avgProfit);
 }

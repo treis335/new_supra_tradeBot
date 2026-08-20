@@ -18,12 +18,10 @@ const { renderFooter, setRpcHealthy } = require('../tui/renderFooter');
 const { fetchWalletBalance } = require('../utils/walletBalance');
 const { writeBotStats } = require('../utils/statsWriter');
 
-// Opportunity Hunter (Fase 2) — ranking inteligente + memória real
 let hunt = null;
 try {
   hunt = require('../hunter').hunt;
-} catch (e) {
-  // Se a pasta hunter ainda não existir, o bot continua a funcionar normalmente
+} catch {
   hunt = null;
 }
 
@@ -33,9 +31,7 @@ let currentOpps = [];
 function taskWithTimeout(task, ms = 20000) {
   return Promise.race([
     task,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Task timeout')), ms)
-    ),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Task timeout')), ms)),
   ]);
 }
 
@@ -43,10 +39,6 @@ let lastAutoTxTime = 0;
 let autoTxInProgress = false;
 let tickCounter = 0;
 
-// Escolhe o executor certo consoante os DEXs envolvidos no ciclo.
-// ANTES: chamava sempre dexlynExecute (modulo Dexlyn) mesmo para ciclos com
-// pools Spikey/Atmos/Dfmm/Evo -> essas transacoes falhavam ou nunca eram tentadas
-// corretamente, o que reduzia drasticamente o numero de trades bem sucedidos.
 function pickExecutor(opp) {
   const dexesInCycle = new Set(opp.result.steps.map((s) => s.dex));
   const onlyDexlyn = [...dexesInCycle].every((d) => d === 'DEXLYN' || d === 'DEXLYN_V3');
@@ -54,29 +46,25 @@ function pickExecutor(opp) {
   const isCrossDex =
     [...dexesInCycle].every((d) => d === 'DEXLYN' || d === 'SPIKEY') && dexesInCycle.size > 1;
 
-  if (onlyDexlyn)
+  if (onlyDexlyn) {
     return {
       execute: require('../dexes/dexlyn/dexlynExecute').executeArbitrage,
       label: 'DEXLYN',
     };
-  if (onlySpikey)
+  }
+  if (onlySpikey) {
     return {
       execute: require('../dexes/spikey/spikeyExecute').executeSpikeySwap,
       label: 'SPIKEY',
     };
-
-  // Cross-DEX (Dexlyn+Spikey no mesmo ciclo): executa legs SEPARADAS, NAO atomico.
-  // Ha risco real de o preco se mover entre legs. So aceita se o lucro estimado
-  // tiver uma margem extra (cfg.crossDexMinProfitPct), para absorver esse risco.
+  }
   if (isCrossDex) {
-    if (opp.result.profitPct < (CONFIG.autoExecute.crossDexMinProfitPct || 1.0)) return null;
+    if (opp.result.profitPct < (CONFIG.autoExecute.crossDexMinProfitPct || 2.0)) return null;
     return {
       execute: require('../executor/crossDexExecute').executeCrossDexArbitrage,
       label: 'CROSS-DEX (não-atómico)',
     };
   }
-
-  // Envolve DEXLYN_V3 misturado com outra DEX, ou outros DEXs nao suportados: nao arrisca.
   return null;
 }
 
@@ -89,15 +77,17 @@ async function maybeAutoExecute(opps, balances, boxes) {
   if (now - lastAutoTxTime < cfg.cooldownMs) return;
   if (!opps || opps.length === 0) return;
 
+  const maxPct = cfg.maxRealisticProfitPct || 50;
   let availableSUPRA = Math.max(0, (balances.SUPRA || 0) - cfg.gasReserveSUPRA);
 
   const viableOpps = opps.filter((opp) => {
     const tokenIn = opp.cycle.path[0];
     if (tokenIn !== 'SUPRA') return false;
     if (opp.result.profitPct < cfg.minProfitPct) return false;
+    if (opp.result.profitPct > maxPct) return false;
     if (opp.score < cfg.minScore) return false;
     if (opp.optimalAmount > availableSUPRA) return false;
-    if (!pickExecutor(opp)) return false; // so mantem ciclos com executor funcional
+    if (!pickExecutor(opp)) return false;
     return true;
   });
 
@@ -111,12 +101,12 @@ async function maybeAutoExecute(opps, balances, boxes) {
     boxes.screen.render();
   };
 
-  const maxPerTick = cfg.maxTradesPerTick || 3;
+  const maxPerTick = cfg.maxTradesPerTick || 2;
   let executed = 0;
 
   for (const opp of viableOpps) {
     if (executed >= maxPerTick) break;
-    if (opp.optimalAmount > availableSUPRA) continue; // saldo ja usado neste tick
+    if (opp.optimalAmount > availableSUPRA) continue;
 
     const executor = pickExecutor(opp);
     const pathLabel = opp.cycle.path.map((t) => CONFIG.tokens[t]?.symbol || t).join(' → ');
@@ -160,9 +150,6 @@ async function maybeAutoExecute(opps, balances, boxes) {
     }
   }
 
-  // 🔥 Removida a lógica que desligava o automático após falhas consecutivas.
-  // O bot permanece em modo AUTO até que o utilizador pressione a tecla 'a'.
-
   autoTxInProgress = false;
 }
 
@@ -170,10 +157,9 @@ async function tick(boxes) {
   const t0 = Date.now();
   const limit = asyncLimit(CONFIG.maxConcurrent);
 
-  // Descoberta automatica de pools novos na Spikey. Corre a cada N ticks (nao todos,
-  // para nao sobrecarregar o RPC) -- 100% automatico, zero trabalho manual.
   tickCounter++;
-  const DISCOVERY_EVERY_N_TICKS = 30; // com pollingMs=2000, ~1 minuto
+
+  const DISCOVERY_EVERY_N_TICKS = 30;
   if (tickCounter % DISCOVERY_EVERY_N_TICKS === 0) {
     discoverNewPools((msg) => {
       if (boxes?.footerBox) {
@@ -187,10 +173,7 @@ async function tick(boxes) {
       .catch((e) => logError('discoverNewPools', e));
   }
 
-  // Analista de performance (DeepSeek): corre a cada ~2h (nao a cada tick -- e uma
-  // analise de tendencias, nao uma decisao de trade individual). Ajusta parametros
-  // dentro de limites seguros com base no que realmente performou.
-  const ANALYST_EVERY_N_TICKS = Math.floor((2 * 3600 * 1000) / (CONFIG.pollingMs || 2000));
+  const ANALYST_EVERY_N_TICKS = Math.floor((2 * 3600 * 1000) / (CONFIG.pollingMs || 3000));
   if (tickCounter % ANALYST_EVERY_N_TICKS === 0) {
     analyzePerformance((msg) => {
       if (boxes?.footerBox) {
@@ -202,24 +185,21 @@ async function tick(boxes) {
 
   const tasks = [];
 
-  // ═══ 1. Dexlyn V2 ═══
   for (const [dexKey, dex] of Object.entries(CONFIG.dexes)) {
     for (const [tokenA, tokenB, curve] of dex.pairs) {
       tasks.push(
         limit(() =>
-          taskWithTimeout(
-            priceEngine.fetchPairState(dexKey, tokenA, tokenB, curve),
-            20000
-          ).catch((e) => {
-            logError(`fetchPair ${tokenA}/${tokenB}`, e);
-            return null;
-          })
+          taskWithTimeout(priceEngine.fetchPairState(dexKey, tokenA, tokenB, curve), 20000).catch(
+            (e) => {
+              logError(`fetchPair ${tokenA}/${tokenB}`, e);
+              return null;
+            }
+          )
         )
       );
     }
   }
 
-  // ═══ 2. Dexlyn V3 ═══
   if (CONFIG.v3Pools && CONFIG.v3Pools.pools && CONFIG.v3Pools.pools.length > 0) {
     for (const v3pool of CONFIG.v3Pools.pools) {
       tasks.push(
@@ -238,7 +218,7 @@ async function tick(boxes) {
                 tokenB: v3pool.tokenB,
                 curve: 'clmm',
                 poolAddress: v3pool.address,
-                state: state,
+                state,
                 reserveA: state.assetA,
                 reserveB: state.assetB,
                 fee: state.feeRate,
@@ -258,10 +238,9 @@ async function tick(boxes) {
     }
   }
 
-  // ═══ 3. Spikey ═══
   if (SPIKEY_CONFIG && SPIKEY_CONFIG.pools && SPIKEY_CONFIG.pools.length > 0) {
     for (const pool of SPIKEY_CONFIG.pools) {
-      if (pool.active === false) continue; // pool em quarentena pelo analista -- nao negoceia
+      if (pool.active === false) continue;
       tasks.push(
         limit(() =>
           taskWithTimeout(
@@ -280,6 +259,12 @@ async function tick(boxes) {
   try {
     pairStates = await Promise.all(tasks);
     pairStates = pairStates.flat().filter(Boolean);
+    // ═══ FILTRO CRÍTICO: excluir pools com reserva 0 ═══
+    pairStates = pairStates.filter((ps) => {
+      const a = Number(ps.reserveA);
+      const b = Number(ps.reserveB);
+      return Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > 0;
+    });
     setRpcHealthy(pairStates.length > 0);
   } catch (e) {
     logError('Promise.all pairStates', e);
@@ -309,9 +294,7 @@ async function tick(boxes) {
     currentOpps = [];
   }
 
-  // ═══ Opportunity Hunter (Fase 2) ═══
-  // Ranking inteligente + memória real de oportunidades.
-  // Se a pasta hunter/ não existir, o bot continua com o fluxo normal.
+  // ═══ Opportunity Hunter ═══
   if (hunt && opps && opps.length > 0) {
     try {
       const hunted = hunt(opps);
@@ -323,10 +306,7 @@ async function tick(boxes) {
     }
   }
 
-  // Snapshot periodico das oportunidades vistas (nao a cada tick -- ficheiro cresceria
-  // demasiado rapido). Serve de contexto para o analista perceber o "estado geral do
-  // mercado" ao longo do tempo, nao so as trades que executamos.
-  const SNAPSHOT_EVERY_N_TICKS = 15; // ~30s
+  const SNAPSHOT_EVERY_N_TICKS = 15;
   if (tickCounter % SNAPSHOT_EVERY_N_TICKS === 0 && opps.length > 0) {
     logEvent('opportunity_snapshot', {
       count: opps.length,
@@ -348,41 +328,18 @@ async function tick(boxes) {
     );
   }
 
-  try {
-    renderPrices(pairStates, boxes, walletBalances);
-  } catch (e) {
-    logError('renderPrices', e);
-  }
-  try {
-    trackActivity(pairStates);
-  } catch (e) {
-    logError('trackActivity', e);
-  }
-  try {
-    renderArb(opps, boxes);
-  } catch (e) {
-    logError('renderArb', e);
-  }
-  try {
-    renderLog(opps, boxes);
-  } catch (e) {
-    logError('renderLog', e);
-  }
-  try {
-    renderFooter(opps, Date.now() - t0, boxes);
-  } catch (e) {
-    logError('renderFooter', e);
-  }
+  try { renderPrices(pairStates, boxes, walletBalances); } catch (e) { logError('renderPrices', e); }
+  try { trackActivity(pairStates); } catch (e) { logError('trackActivity', e); }
+  try { renderArb(opps, boxes); } catch (e) { logError('renderArb', e); }
+  try { renderLog(opps, boxes); } catch (e) { logError('renderLog', e); }
+  try { renderFooter(opps, Date.now() - t0, boxes); } catch (e) { logError('renderFooter', e); }
 
-  // A cada ~10s, grava o estado real para o dashboard-web (processo separado) ler.
-  const STATS_EVERY_N_TICKS = Math.max(1, Math.floor(10000 / (CONFIG.pollingMs || 2000)));
+  const STATS_EVERY_N_TICKS = Math.max(1, Math.floor(10000 / (CONFIG.pollingMs || 3000)));
   if (tickCounter % STATS_EVERY_N_TICKS === 0) {
     writeBotStats({ walletBalances, opps, tickMs: Date.now() - t0 });
   }
 
-  try {
-    boxes.screen.render();
-  } catch {}
+  try { boxes.screen.render(); } catch {}
 }
 
 function getBestOpportunity() {
