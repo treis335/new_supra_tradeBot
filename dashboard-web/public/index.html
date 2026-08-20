@@ -34,55 +34,46 @@
                 </div>
                 <div class="card-body" id="botStatus">
                     <div class="status-item">
-                        <span class="label">🟢 Estado</span>
-                        <span class="value" id="botRunning">ATIVO</span>
+                        <span class="label">🔵 Estado</span>
+                        <span class="value" id="botRunning">A verificar...</span>
                     </div>
                     <div class="status-item">
                         <span class="label">💰 Carteira</span>
-                        <span class="value" id="botBalance">174419 SUPRA</span>
+                        <span class="value" id="botBalance">—</span>
                     </div>
                     <div class="status-item">
                         <span class="label">📈 Pares</span>
-                        <span class="value" id="botPairs">56</span>
+                        <span class="value" id="botPairs">—</span>
                     </div>
                     <div class="status-item">
-                        <span class="label">🔄 Trades</span>
-                        <span class="value" id="botTrades">342</span>
+                        <span class="label">🔄 Trades (24h)</span>
+                        <span class="value" id="botTrades">—</span>
                     </div>
                     <div class="status-item">
-                        <span class="label">💹 Lucro</span>
-                        <span class="value profit" id="botProfit">12.4%</span>
+                        <span class="label">💹 Lucro (24h)</span>
+                        <span class="value profit" id="botProfit">—</span>
                     </div>
                     <div class="status-item">
                         <span class="label">🎯 Sucesso</span>
-                        <span class="value" id="botSuccess">78.2%</span>
+                        <span class="value" id="botSuccess">—</span>
                     </div>
                     <div class="status-item">
-                        <span class="label">🧠 Ciclos</span>
-                        <span class="value" id="botCycles">47</span>
+                        <span class="label">⚡ Oportunidades</span>
+                        <span class="value" id="botCycles">—</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Pensamentos do Cérebro -->
+            <!-- Propostas Pendentes (aprovação humana obrigatória) -->
             <div class="card brain-card">
                 <div class="card-header">
                     <span>🧠</span>
-                    <h2>Pensamentos do Cérebro</h2>
-                    <span class="badge" id="brainCount">5 pensamentos</span>
+                    <h2>Propostas do Analista (DeepSeek)</h2>
+                    <span class="badge" id="brainCount">0 pendentes</span>
                 </div>
-                <div class="card-body brain-log" id="brainLogs">
+                <div class="card-body brain-log" id="proposalsList">
                     <div class="brain-thought">
-                        <span class="thought-time">12:54</span>
-                        <span class="thought-text">Analisando padrões de arbitragem...</span>
-                    </div>
-                    <div class="brain-thought">
-                        <span class="thought-time">12:53</span>
-                        <span class="thought-text">Detectada oportunidade em SUPRA/DEXUSDC</span>
-                    </div>
-                    <div class="brain-thought">
-                        <span class="thought-time">12:52</span>
-                        <span class="thought-text">Otimizando parâmetros de trading</span>
+                        <span class="thought-text">Sem propostas pendentes. O analista sugere aqui ideias e ajustes — nada é aplicado sem aprovares.</span>
                     </div>
                 </div>
             </div>
@@ -92,23 +83,11 @@
                 <div class="card-header">
                     <span>📈</span>
                     <h2>Mercado Ativo</h2>
-                    <span class="badge" id="marketCount">9 pares</span>
+                    <span class="badge" id="marketCount">0 pares</span>
                 </div>
                 <div class="card-body" id="marketData">
-                    <div class="market-item up">
-                        <span class="pair">SUPRA/CASH</span>
-                        <span class="price">0.000212</span>
-                        <span class="change positive">+0.00%</span>
-                    </div>
-                    <div class="market-item down">
-                        <span class="pair">SUPRA/DAWGZ</span>
-                        <span class="price">118.4645</span>
-                        <span class="change negative">-0.47%</span>
-                    </div>
-                    <div class="market-item up">
-                        <span class="pair">DAWGZ/DEXUSDC</span>
-                        <span class="price">0.000008</span>
-                        <span class="change positive">+0.75%</span>
+                    <div class="market-item">
+                        <span class="pair">Sem dados ainda — liga o bot principal (node index.js)</span>
                     </div>
                 </div>
             </div>
@@ -117,24 +96,12 @@
             <div class="card trades-card">
                 <div class="card-header">
                     <span>🔄</span>
-                    <h2>Log de Trades</h2>
-                    <span class="badge" id="tradesCount">7 trades</span>
+                    <h2>Log de Trades (reais)</h2>
+                    <span class="badge" id="tradesCount">0 trades</span>
                 </div>
                 <div class="card-body trades-log" id="tradesLog">
-                    <div class="trade-item yellow">
-                        <span class="trade-time">13:53:35</span>
-                        <span class="trade-icon">◆</span>
-                        <span class="trade-text">+1.877% sc:78 SUPRA [DLyn]</span>
-                    </div>
-                    <div class="trade-item yellow">
-                        <span class="trade-time">13:54:35</span>
-                        <span class="trade-icon">◆</span>
-                        <span class="trade-text">+0.647% sc:41 SUPRA [DLyn]</span>
-                    </div>
-                    <div class="trade-item green">
-                        <span class="trade-time">13:55:35</span>
-                        <span class="trade-icon">◆</span>
-                        <span class="trade-text">VENDEU 90.51 SUPRA (recebeu ~9318 LUCKY)</span>
+                    <div class="trade-item">
+                        <span class="trade-text">Sem trades ainda.</span>
                     </div>
                 </div>
             </div>
@@ -147,28 +114,28 @@
                 </div>
                 <div class="card-body metrics-grid">
                     <div class="metric">
-                        <span class="metric-label">💹 Lucro Total</span>
-                        <span class="metric-value" id="metricProfit">12.4%</span>
+                        <span class="metric-label">💹 Lucro 24h</span>
+                        <span class="metric-value" id="metricProfit">—</span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">🔄 Trades</span>
-                        <span class="metric-value" id="metricTrades">342</span>
+                        <span class="metric-label">🔄 Trades 24h</span>
+                        <span class="metric-value" id="metricTrades">—</span>
                     </div>
                     <div class="metric">
                         <span class="metric-label">🎯 Sucesso</span>
-                        <span class="metric-value" id="metricSuccess">78.2%</span>
+                        <span class="metric-value" id="metricSuccess">—</span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">⚡ Oportunidades</span>
-                        <span class="metric-value" id="metricOpportunities">14</span>
+                        <span class="metric-label">⚡ Oportunidades agora</span>
+                        <span class="metric-value" id="metricOpportunities">—</span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">📊 Volume</span>
-                        <span class="metric-value" id="metricVolume">2,427 SUPRA</span>
+                        <span class="metric-label">📈 Pares ativos</span>
+                        <span class="metric-value" id="metricVolume">—</span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">🧠 Ciclos</span>
-                        <span class="metric-value" id="metricCycles">47</span>
+                        <span class="metric-label">🧠 Tick atual</span>
+                        <span class="metric-value" id="metricCycles">—</span>
                     </div>
                 </div>
             </div>
@@ -186,12 +153,12 @@
                         </div>
                     </div>
                     <div class="console-input">
-                        <input type="text" id="commandInput" placeholder="Digite um comando (ex: status, pausar, retomar, performance) ou faça uma pergunta...">
+                        <input type="text" id="commandInput" placeholder="Digite um comando (ex: status, performance) ou faça uma pergunta...">
                         <button id="sendCommand">Enviar</button>
                     </div>
                     <div class="console-hints">
-                        <span>💡 Comandos: status, pausar, retomar, performance</span>
-                        <span>💬 Qualquer pergunta em português</span>
+                        <span>💡 Comandos: status, performance</span>
+                        <span>💬 Qualquer pergunta em português (precisa de DEEPSEEK_API_KEY)</span>
                     </div>
                 </div>
             </div>

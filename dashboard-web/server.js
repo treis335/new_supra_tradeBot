@@ -1,4 +1,11 @@
 // dashboard-web/server.js
+//
+// CORRIGIDO: a versao anterior gerava dados de mercado e trades com Math.random(),
+// e o saldo/lucro vinham de valores fixos no codigo -- nada disto refletia o bot
+// real. Agora le tudo de data/live_state.json (escrito pelo loop/tick.js real) e
+// data/history.jsonl (historico persistente real). Se o bot nao estiver a correr,
+// diz isso claramente em vez de inventar numeros.
+
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -6,242 +13,183 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 const { DeepSeekAPI } = require('../agent/deepseekClient');
+const { readLiveState } = require('../intelligence/liveStateWriter');
+const { readRecentHistory } = require('../intelligence/historyLogger');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Configurações
-const PORT = 3000;
-const brainLogFile = path.join(__dirname, '../.brain_memory.json');
-const botStatsFile = path.join(__dirname, '../.bot_stats.json');
+const PORT = process.env.DASHBOARD_PORT || 3000;
+const REPORTS_FILE = path.join(__dirname, '..', 'data', 'analyst_reports.jsonl');
+const PROPOSALS_FILE = path.join(__dirname, '..', 'data', 'proposals.jsonl');
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Instância do DeepSeek
 const deepseek = new DeepSeekAPI();
-
-// ============================================
-// ESTADO GLOBAL
-// ============================================
-
 let clients = [];
-let botStats = {
-    running: true,
-    balance: '174419 SUPRA',
-    pairs: 56,
-    totalTrades: 342,
-    profit: '12.4%',
-    successRate: '78.2%',
-    opportunities: 14,
-    cycles: 47
-};
-
-let brainLogs = [];
-let trades = [];
-let marketData = [];
 
 // ============================================
-// FUNÇÕES DE COLETA DE DADOS
+// DADOS REAIS (sem Math.random em lado nenhum)
 // ============================================
 
-function loadBotStats() {
+function getRealSnapshot() {
+    const live = readLiveState(); // null se o bot nao escreveu nada ainda / esta parado
+
+    const historyEvents = readRecentHistory({ sinceHoursAgo: 24, maxEvents: 500 });
+    const trades = historyEvents.filter(e => e.type === 'trade_executed');
+    const successCount = trades.filter(t => t.success).length;
+    const totalProfitAbs = trades.filter(t => t.success).reduce((s, t) => s + (t.profitAbs || 0), 0);
+
+    return {
+        running: !!(live && live.running),
+        stale: live ? live.staleForMs : null,
+        botStats: {
+            balance: live?.walletBalances?.SUPRA != null ? `${live.walletBalances.SUPRA} SUPRA` : 'sem dados',
+            pairs: live?.pairCount ?? 0,
+            totalTrades24h: trades.length,
+            successCount, failCount: trades.length - successCount,
+            successRate: trades.length ? ((successCount / trades.length) * 100).toFixed(1) + '%' : '—',
+            profitAbs24h: totalProfitAbs.toFixed(4) + ' SUPRA',
+            opportunities: live?.opportunityCount ?? 0,
+            bestOpportunity: live?.bestOpportunity || null,
+        },
+        marketData: (live?.topPairs || []).map(p => ({
+            pair: `${p.tokenA}/${p.tokenB}`, dex: p.dex,
+            price: p.priceAinB != null ? Number(p.priceAinB).toFixed(6) : '—',
+        })),
+        trades: (live?.recentTrades || []).map(t => ({
+            time: t.time, dex: t.dex, path: t.path,
+            profit: t.profitPct != null ? `+${t.profitPct.toFixed(3)}%` : '',
+            success: t.success, error: t.error || null,
+        })),
+        updatedAt: live?.updatedAt || null,
+    };
+}
+
+function getRecentAnalystReports() {
     try {
-        if (fs.existsSync(botStatsFile)) {
-            const data = JSON.parse(fs.readFileSync(botStatsFile, 'utf8'));
-            botStats = { ...botStats, ...data };
-        }
-    } catch (e) {}
+        if (!fs.existsSync(REPORTS_FILE)) return [];
+        const lines = fs.readFileSync(REPORTS_FILE, 'utf8').split('\n').filter(Boolean);
+        return lines.slice(-10).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).reverse();
+    } catch { return []; }
 }
 
-function loadBrainLogs() {
+function getPendingProposals() {
     try {
-        if (fs.existsSync(brainLogFile)) {
-            const data = JSON.parse(fs.readFileSync(brainLogFile, 'utf8'));
-            brainLogs = data.learnings || [];
-        }
-    } catch (e) {}
-}
-
-function generateMarketData() {
-    const pairs = [
-        'SUPRA/CASH', 'SUPRA/DAWGZ', 'DAWGZ/DEXUSDC',
-        'JOSH/DEXUSDC', 'LOWCAPS/DEXUSDC', 'SPIKE/DEXUSDC',
-        'SUPRA/DEXUSDC', 'SUPRA/DRAGON', 'SUPRA/iSUPRA'
-    ];
-    
-    marketData = pairs.map(pair => {
-        const price = (Math.random() * 100 + 0.1);
-        const change = (Math.random() * 4 - 2);
-        return {
-            pair,
-            price: price.toFixed(4),
-            change: change.toFixed(2),
-            changePositive: change >= 0
-        };
-    });
-}
-
-function generateTrades() {
-    const types = [
-        { icon: '◆', color: 'yellow', text: 'sc:78 SUPRA [DLyn]', profit: '+1.877%' },
-        { icon: '◆', color: 'yellow', text: 'sc:41 SUPRA [DLyn]', profit: '+0.647%' },
-        { icon: '◆', color: 'green', text: 'VENDEU 90.51 SUPRA (recebeu ~9318 LUCKY)', profit: '' },
-        { icon: '◆', color: 'green', text: 'COMPROU 1398 SUPRA (pagou ~0.7997 DEXUSDC)', profit: '' },
-        { icon: '◆', color: 'yellow', text: 'sc:68 SUPRA [DLyn]', profit: '+1.556%' },
-        { icon: '◆', color: 'green', text: 'VENDEU 27356 NANA (recebeu ~217.87 SUPRA)', profit: '' },
-        { icon: '◆', color: 'cyan', text: 'Oportunidade detectada', profit: '+0.847%' }
-    ];
-    
-    const now = Date.now();
-    trades = types.map((t, i) => {
-        const time = new Date(now - (types.length - i) * 30000);
-        return {
-            time: time.toTimeString().substring(0, 8),
-            icon: t.icon,
-            color: t.color,
-            text: t.text,
-            profit: t.profit
-        };
-    });
+        if (!fs.existsSync(PROPOSALS_FILE)) return [];
+        const lines = fs.readFileSync(PROPOSALS_FILE, 'utf8').split('\n').filter(Boolean);
+        return lines.map(l => { try { return JSON.parse(l); } catch { return null; } })
+            .filter(p => p && p.status === 'pending').reverse();
+    } catch { return []; }
 }
 
 // ============================================
-// BROADCAST PARA CLIENTES
+// BROADCAST
 // ============================================
 
 function broadcast(data) {
     clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify(data));
-        }
+        if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(data));
     });
 }
 
 function updateAllData() {
-    loadBotStats();
-    loadBrainLogs();
-    generateMarketData();
-    generateTrades();
-    
-    const payload = {
+    const snapshot = getRealSnapshot();
+    broadcast({
         type: 'update',
         data: {
-            botStats,
-            brainLogs: brainLogs.slice(-5),
-            marketData,
-            trades,
-            timestamp: new Date().toISOString()
-        }
-    };
-    
-    broadcast(payload);
+            ...snapshot,
+            analystReports: getRecentAnalystReports().slice(0, 5),
+            pendingProposals: getPendingProposals(),
+            timestamp: new Date().toISOString(),
+        },
+    });
 }
 
 // ============================================
-// WEBHOOKS E API ENDPOINTS
+// API
 // ============================================
 
-// API: Status do bot
 app.get('/api/status', (req, res) => {
-    res.json({ success: true, data: botStats });
+    res.json({ success: true, data: getRealSnapshot() });
 });
 
-// API: Pensamentos do cérebro
-app.get('/api/brain', (req, res) => {
-    res.json({ success: true, data: brainLogs.slice(-10) });
-});
-
-// API: Mercado
-app.get('/api/market', (req, res) => {
-    generateMarketData();
-    res.json({ success: true, data: marketData });
-});
-
-// API: Trades
-app.get('/api/trades', (req, res) => {
-    generateTrades();
-    res.json({ success: true, data: trades });
-});
-
-// API: Dashboard completo
 app.get('/api/dashboard', (req, res) => {
-    loadBotStats();
-    loadBrainLogs();
-    generateMarketData();
-    generateTrades();
-    
+    const snapshot = getRealSnapshot();
     res.json({
         success: true,
         data: {
-            botStats,
-            brainLogs: brainLogs.slice(-10),
-            marketData,
-            trades,
-            timestamp: new Date().toISOString()
-        }
+            ...snapshot,
+            analystReports: getRecentAnalystReports().slice(0, 5),
+            pendingProposals: getPendingProposals(),
+            timestamp: new Date().toISOString(),
+        },
     });
 });
 
-// API: Comandos
+app.get('/api/proposals', (req, res) => {
+    res.json({ success: true, data: getPendingProposals() });
+});
+
+// Aprovar/rejeitar uma proposta -- e AQUI que fica o "botao humano" antes de
+// qualquer ideia da IA passar a ter efeito real. Nao existe um caminho que
+// aplique propostas automaticamente sem passar por aqui.
+app.post('/api/proposals/:id/decide', (req, res) => {
+    const { id } = req.params;
+    const { decision } = req.body; // 'approved' | 'rejected'
+    if (!['approved', 'rejected'].includes(decision)) {
+        return res.status(400).json({ success: false, error: 'decision tem de ser approved ou rejected' });
+    }
+    try {
+        if (!fs.existsSync(PROPOSALS_FILE)) return res.status(404).json({ success: false, error: 'sem propostas' });
+        const lines = fs.readFileSync(PROPOSALS_FILE, 'utf8').split('\n').filter(Boolean);
+        const updated = lines.map(l => {
+            const p = JSON.parse(l);
+            if (p.id === id) p.status = decision;
+            return JSON.stringify(p);
+        });
+        fs.writeFileSync(PROPOSALS_FILE, updated.join('\n') + '\n');
+        res.json({ success: true });
+        updateAllData();
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 app.post('/api/command', async (req, res) => {
     const { command } = req.body;
-    
-    if (!command) {
-        return res.json({ success: false, error: 'Comando não fornecido' });
-    }
-    
+    if (!command) return res.json({ success: false, error: 'Comando não fornecido' });
+
     const cmd = command.toLowerCase().trim();
     let response = '';
-    
-    switch(cmd) {
+    const snapshot = getRealSnapshot();
+
+    switch (cmd) {
         case 'status':
-            response = `📊 STATUS DO BOT:\n🟢 ${botStats.running ? 'ATIVO' : 'PAUSADO'}\n💰 ${botStats.balance}\n📈 ${botStats.pairs} pares\n🔄 ${botStats.totalTrades} trades\n💹 ${botStats.profit}`;
-            break;
-        case 'pausar':
-            botStats.running = false;
-            response = '⏸️ Bot pausado!';
-            break;
-        case 'retomar':
-            botStats.running = true;
-            response = '▶️ Bot retomado!';
+            response = snapshot.running
+                ? `📊 STATUS: 🟢 ATIVO\n💰 ${snapshot.botStats.balance}\n📈 ${snapshot.botStats.pairs} pares\n🔄 ${snapshot.botStats.totalTrades24h} trades (24h)\n💹 lucro 24h: ${snapshot.botStats.profitAbs24h}`
+                : `📊 STATUS: 🔴 O bot não parece estar a correr (sem atualizações recentes).\nCorre "node index.js" no terminal principal primeiro.`;
             break;
         case 'performance':
-            response = `📊 PERFORMANCE:\n💹 Lucro: ${botStats.profit}\n🔄 Trades: ${botStats.totalTrades}\n🎯 Sucesso: ${botStats.successRate}\n⚡ Oportunidades: ${botStats.opportunities}`;
+            response = `📊 PERFORMANCE (24h real):\n🔄 Trades: ${snapshot.botStats.totalTrades24h}\n🎯 Sucesso: ${snapshot.botStats.successRate}\n💹 Lucro: ${snapshot.botStats.profitAbs24h}\n⚡ Oportunidades agora: ${snapshot.botStats.opportunities}`;
             break;
         default:
-            // Usar DeepSeek para respostas naturais
             try {
+                const context = `Estado atual real do bot: ${JSON.stringify(snapshot.botStats)}`;
                 const aiResponse = await deepseek.chat([
-                    { role: 'system', content: 'Você é um assistente de trading. Responda de forma útil e concisa.' },
-                    { role: 'user', content: command }
+                    { role: 'system', content: `Es um assistente de trading. Responde de forma util e concisa, em portugues. ${context}` },
+                    { role: 'user', content: command },
                 ]);
                 response = aiResponse;
             } catch (e) {
-                response = '❓ Não entendi o comando. Tente: status, pausar, retomar, performance';
+                response = '❓ Não entendi o comando, ou a DEEPSEEK_API_KEY não está configurada. Tente: status, performance';
             }
     }
-    
-    // Adicionar ao log
-    trades.unshift({
-        time: new Date().toTimeString().substring(0, 8),
-        icon: '💬',
-        color: 'white',
-        text: `Comando: ${command}`,
-        profit: ''
-    });
-    
-    res.json({
-        success: true,
-        response: response,
-        command: command
-    });
-    
-    // Atualizar todos os clientes
-    updateAllData();
+
+    res.json({ success: true, response, command });
 });
 
 // ============================================
@@ -249,43 +197,17 @@ app.post('/api/command', async (req, res) => {
 // ============================================
 
 wss.on('connection', (ws) => {
-    console.log('🟢 Cliente conectado!');
+    console.log('🟢 Cliente conectado ao dashboard');
     clients.push(ws);
-    
-    // Enviar dados iniciais
     updateAllData();
-    
-    ws.on('close', () => {
-        clients = clients.filter(client => client !== ws);
-        console.log('🔴 Cliente desconectado');
-    });
-    
-    ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
-    });
+    ws.on('close', () => { clients = clients.filter(c => c !== ws); });
+    ws.on('error', (err) => console.error('WebSocket error:', err.message));
 });
 
-// ============================================
-// ATUALIZAÇÃO AUTOMÁTICA (a cada 3 segundos)
-// ============================================
-
-setInterval(() => {
-    updateAllData();
-}, 3000);
-
-// ============================================
-// INICIAR SERVIDOR
-// ============================================
+setInterval(updateAllData, 3000);
 
 server.listen(PORT, () => {
-    console.log('🚀 Dashboard Web iniciado!');
+    console.log('🚀 Dashboard Web iniciado (dados reais, sem simulação)');
     console.log(`📊 Acesse: http://localhost:${PORT}`);
-    console.log('='.repeat(50));
-    console.log('💡 Comandos disponíveis na interface:');
-    console.log('  - status: Ver status do bot');
-    console.log('  - pausar: Pausar operações');
-    console.log('  - retomar: Retomar operações');
-    console.log('  - performance: Ver métricas');
-    console.log('  - Qualquer pergunta em português!');
-    console.log('='.repeat(50));
+    console.log('⚠️  Se o loop/tick.js principal não estiver a correr, o dashboard mostra "sem dados" -- isso é esperado, não um bug.');
 });

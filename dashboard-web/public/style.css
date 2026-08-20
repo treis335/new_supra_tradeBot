@@ -222,6 +222,65 @@ body {
     border-bottom: none;
 }
 
+.proposal-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 10px 0;
+}
+
+.proposal-header {
+    display: flex;
+    justify-content: space-between;
+}
+
+.proposal-type {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--accent-cyan, #4dd8e6);
+    background: rgba(77, 216, 230, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.proposal-desc {
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+}
+
+.proposal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.proposal-actions button {
+    flex: 1;
+    padding: 6px 10px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    transition: opacity 0.15s;
+}
+
+.proposal-actions button:hover {
+    opacity: 0.85;
+}
+
+.approve-btn {
+    background: rgba(72, 199, 116, 0.15);
+    color: #48c774;
+    border: 1px solid rgba(72, 199, 116, 0.3) !important;
+}
+
+.reject-btn {
+    background: rgba(255, 99, 99, 0.15);
+    color: #ff6363;
+    border: 1px solid rgba(255, 99, 99, 0.3) !important;
+}
+
 .thought-time {
     color: var(--text-secondary);
     font-size: 0.75rem;
@@ -319,6 +378,7 @@ body {
 .trade-item.yellow .trade-icon { color: var(--accent-yellow); }
 .trade-item.green .trade-icon { color: var(--accent-green); }
 .trade-item.cyan .trade-icon { color: var(--accent-cyan); }
+.trade-item.red .trade-icon { color: #ff6363; }
 
 /* ============================================
    METRICS CARD

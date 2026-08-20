@@ -14,6 +14,7 @@ const path = require('path');
 const { CONFIG } = require('../config/config');
 const { readRecentHistory, logEvent } = require('./historyLogger');
 const { logError } = require('../utils/logError');
+const { createProposal } = require('./proposalQueue');
 
 const REPORT_FILE = path.join(__dirname, '..', 'data', 'analyst_reports.jsonl');
 
@@ -170,4 +171,79 @@ Em caso de duvida real, usa safe:false (mais vale ficar de fora de um pool bom d
     }
 }
 
-module.exports = { analyzePerformance, assessNewPool };
+// ── Ideias mais abertas (novos pares a vigiar, padroes horarios, etc) ─────
+// Diferente de analyzePerformance (numeros dentro de limites fixos, aplicados
+// direto -- ja aprovaste esse padrao), isto pode sugerir coisas mais amplas.
+// Por isso NAO aplica nada sozinho -- cria uma proposta "idea" que so serve
+// para leres no dashboard. Nunca vira codigo ou config sem passares por ali.
+async function generateCapabilityReport(log = () => {}) {
+    const events = readRecentHistory({ sinceHoursAgo: 48, maxEvents: 5000 });
+    const marketSnapshots = events.filter(e => e.type === 'market_snapshot');
+    const activityBatches = events.filter(e => e.type === 'market_activity_batch');
+    const trades = events.filter(e => e.type === 'trade_executed');
+
+    if (marketSnapshots.length < 2 && activityBatches.length < 5) {
+        return { skipped: true, reason: 'dados insuficientes ainda (deixa o bot correr mais tempo)' };
+    }
+
+    const activityByPair = {};
+    for (const batch of activityBatches) {
+        for (const a of (batch.activities || [])) {
+            const key = `${a.dex}_${a.tokenA}/${a.tokenB}`;
+            if (!activityByPair[key]) activityByPair[key] = { count: 0, buys: 0, sells: 0 };
+            activityByPair[key].count++;
+            if (a.isBuyA) activityByPair[key].buys++; else activityByPair[key].sells++;
+        }
+    }
+    const topActivePairs = Object.entries(activityByPair)
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 15)
+        .map(([key, stats]) => ({ pair: key, ...stats }));
+
+    const systemPrompt = `Es um analista de mercado para um bot de arbitragem cripto (Supra blockchain, DEXs Dexlyn e Spikey).
+Com base em dados reais de atividade de mercado (nao inventados), sugere ideias CONCRETAS e ACIONAVEIS para
+o operador humano considerar -- NUNCA sugiras auto-implementacao ou auto-modificacao de codigo, so ideias.
+Responde APENAS em JSON:
+{
+  "summary": "resumo curto em portugues do que observaste nos dados",
+  "suggestions": [
+    {"idea": "descricao curta", "reasoning": "porque, baseado em que dado", "priority": "low"|"medium"|"high"}
+  ]
+}
+Maximo 5 sugestoes. So sugere coisas suportadas pelos dados fornecidos -- nao adivinhes tendencias sem base nos numeros.`;
+
+    const userPrompt = `Pares mais ativos (ultimas 48h, ${activityBatches.length} lotes de atividade observados):
+${JSON.stringify(topActivePairs, null, 2)}
+
+Trades executadas pelo bot: ${trades.length} (${trades.filter(t => t.success).length} sucesso)
+Snapshots de mercado completo capturados: ${marketSnapshots.length}`;
+
+    try {
+        const result = await callDeepSeek(systemPrompt, userPrompt);
+        if (!result) return { skipped: true, reason: 'DEEPSEEK_API_KEY nao configurada' };
+
+        const reportEntry = { ts: Date.now(), type: 'capability_report', ...result };
+        fs.appendFileSync(REPORT_FILE, JSON.stringify(reportEntry) + '\n');
+
+        // Cada sugestao vira uma proposta "idea" -- fica so para leres, sem efeito
+        // automatico nenhum no bot.
+        for (const s of (result.suggestions || [])) {
+            createProposal({
+                type: 'idea',
+                title: s.idea,
+                description: `${s.reasoning} (prioridade: ${s.priority})`,
+                payload: s,
+            });
+        }
+
+        if (result.suggestions?.length > 0) {
+            log(`{cyan-fg}🧠 Analista: ${result.suggestions.length} ideia(s) nova(s) no dashboard, a aguardar leitura{/}`);
+        }
+        return result;
+    } catch (e) {
+        logError('deepseekAnalyst.generateCapabilityReport', e);
+        return { error: e.message };
+    }
+}
+
+module.exports = { analyzePerformance, assessNewPool, generateCapabilityReport };

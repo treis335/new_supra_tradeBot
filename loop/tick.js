@@ -7,11 +7,14 @@ const { SPIKEY_CONFIG } = require('../dexes/spikey/spikeyConfig');
 const { discoverNewPools } = require('../dexes/spikey/spikeyDiscovery');
 const { logEvent } = require('../intelligence/historyLogger');
 const { analyzePerformance } = require('../intelligence/deepseekAnalyst');
+const { generateCapabilityReport } = require('../intelligence/deepseekAnalyst');
+const { applyApprovedProposals } = require('../intelligence/proposalApplier');
 const graphEngine = require('../engine/graphEngine');
 const { arbDetector } = require('../detector/arbDetector');
 const { logError } = require('../utils/logError');
 const renderPrices = require('../tui/renderPrices');
 const { trackActivity } = require('../tracker/tradeActivityTracker');
+const { writeLiveState } = require('../intelligence/liveStateWriter');
 const renderArb = require('../tui/renderArb');
 const renderLog = require('../tui/renderlog');
 const { renderFooter, setRpcHealthy } = require('../tui/renderFooter');
@@ -32,6 +35,8 @@ function taskWithTimeout(task, ms = 20000) {
 let lastAutoTxTime = 0;
 let autoTxInProgress = false;
 let tickCounter = 0;
+const recentTradesBuffer = []; // ultimas trades reais, para o dashboard mostrar (nao inventadas)
+const MAX_RECENT_TRADES = 20;
 
 // Escolhe o executor certo consoante os DEXs envolvidos no ciclo.
 // ANTES: chamava sempre dexlynExecute (modulo Dexlyn) mesmo para ciclos com
@@ -111,11 +116,19 @@ async function maybeAutoExecute(opps, balances, boxes) {
                     profitPct: opp.result.profitPct, profitAbs: opp.result.profitAbs,
                     amount: opp.optimalAmount, txHash: res.txHash, success: true,
                 });
+                recentTradesBuffer.unshift({
+                    time: new Date().toLocaleTimeString('pt-PT'), dex: executor.label,
+                    path: pathLabel, profitPct: opp.result.profitPct, txHash: res.txHash, success: true,
+                });
             } else {
                 log(`{red-fg}❌ Falhou: ${pathLabel}{/}`);
                 logEvent('trade_executed', {
                     dex: executor.label, path: pathLabel,
                     profitPct: opp.result.profitPct, amount: opp.optimalAmount, success: false,
+                });
+                recentTradesBuffer.unshift({
+                    time: new Date().toLocaleTimeString('pt-PT'), dex: executor.label,
+                    path: pathLabel, success: false,
                 });
             }
         } catch (e) {
@@ -123,7 +136,12 @@ async function maybeAutoExecute(opps, balances, boxes) {
             logEvent('trade_executed', {
                 dex: executor.label, path: pathLabel, success: false, error: e.message,
             });
+            recentTradesBuffer.unshift({
+                time: new Date().toLocaleTimeString('pt-PT'), dex: executor.label,
+                path: pathLabel, success: false, error: e.message,
+            });
         }
+        while (recentTradesBuffer.length > MAX_RECENT_TRADES) recentTradesBuffer.pop();
     }
 
     // 🔥 Removida a lógica que desligava o automático após falhas consecutivas.
@@ -162,6 +180,32 @@ async function tick(boxes) {
                 boxes.screen.render();
             }
         }).catch(e => logError('analyzePerformance', e));
+    }
+
+    // Relatorio de ideias mais abertas (~6h) -- cria propostas "idea" no dashboard,
+    // nunca aplica nada sozinho.
+    const CAPABILITY_REPORT_EVERY_N_TICKS = ANALYST_EVERY_N_TICKS * 3;
+    if (tickCounter % CAPABILITY_REPORT_EVERY_N_TICKS === 0) {
+        generateCapabilityReport((msg) => {
+            if (boxes?.footerBox) {
+                boxes.footerBox.setContent(msg);
+                boxes.screen.render();
+            }
+        }).catch(e => logError('generateCapabilityReport', e));
+    }
+
+    // Aplica propostas que TU aprovaste no dashboard (nunca as que estao "pending").
+    // Corre com frequencia (~30s) para a aprovacao ter efeito rapido depois de clicares.
+    const APPLY_PROPOSALS_EVERY_N_TICKS = 15;
+    if (tickCounter % APPLY_PROPOSALS_EVERY_N_TICKS === 0) {
+        try {
+            applyApprovedProposals((msg) => {
+                if (boxes?.footerBox) {
+                    boxes.footerBox.setContent(msg);
+                    boxes.screen.render();
+                }
+            });
+        } catch (e) { logError('applyApprovedProposals', e); }
     }
 
     const tasks = [];
@@ -288,6 +332,13 @@ async function tick(boxes) {
     try { renderArb(opps, boxes); } catch (e) { logError('renderArb', e); }
     try { renderLog(opps, boxes); } catch (e) { logError('renderLog', e); }
     try { renderFooter(opps, Date.now() - t0, boxes); } catch (e) { logError('renderFooter', e); }
+
+    // Escreve o estado real para o dashboard web ler (processo separado, sem
+    // acesso a esta memoria). Sem isto, o dashboard nao tem forma de saber o
+    // que se esta realmente a passar no bot.
+    try {
+        writeLiveState({ walletBalances, pairStates, opps, tickCounter, recentTrades: recentTradesBuffer });
+    } catch (e) { logError('writeLiveState', e); }
 
     try { boxes.screen.render(); } catch {}
 }
