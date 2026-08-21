@@ -266,6 +266,61 @@ body {
 .restart-btn:hover { filter: brightness(1.1); }
 .restart-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ============================================
+   WIRING (ligar componentes ao bot)
+   ============================================ */
+.wiring-card {
+    grid-column: span 2;
+}
+
+.wiring-subtitle {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: 14px 0 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.wiring-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.wiring-item {
+    background: rgba(217, 70, 239, 0.06);
+    border: 1px solid rgba(217, 70, 239, 0.2);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.wire-form {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.wire-export-input {
+    flex: 1;
+    min-width: 180px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    padding: 6px 8px;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+}
+
+.wire-hook-select {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    padding: 6px 8px;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+}
+
 .codegen-hint {
     font-size: 0.85rem;
     color: var(--text-secondary);

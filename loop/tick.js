@@ -5,7 +5,8 @@ const priceEngineV3 = require('../dexes/dexlyn/dexlynEngineV3');
 const spikeyEngine = require('../dexes/spikey/spikeyEngine');
 const { SPIKEY_CONFIG } = require('../dexes/spikey/spikeyConfig');
 const { discoverNewPools } = require('../dexes/spikey/spikeyDiscovery');
-const { logEvent } = require('../intelligence/historyLogger');
+const { logEvent, readRecentHistory } = require('../intelligence/historyLogger');
+const { applyScoreModifiers } = require('../intelligence/componentRegistry');
 const { analyzePerformance } = require('../intelligence/deepseekAnalyst');
 const graphEngine = require('../engine/graphEngine');
 const { arbDetector } = require('../detector/arbDetector');
@@ -282,6 +283,22 @@ async function tick(boxes) {
     opps = [];
     bestOpportunity = null;
     currentOpps = [];
+  }
+
+  // ═══ Componentes aprovados e ligados (intelligence/componentRegistry.js) ═══
+  // Único ponto de extensão onde código gerado por IA e aprovado pelo humano
+  // pode influenciar o trading real -- nunca edita este ficheiro, só ajusta
+  // o score dentro de limites presos (0.5x-2x), sempre isolado em try/catch
+  // por componente, nunca pode rebentar o tick nem sair dos limites.
+  if (opps && opps.length > 0) {
+    try {
+      applyScoreModifiers(opps, { history: readRecentHistory({ sinceHoursAgo: 24 }) });
+      opps.sort((a, b) => b.score - a.score);
+      bestOpportunity = opps[0] || null;
+      currentOpps = opps;
+    } catch (e) {
+      logError('applyScoreModifiers', e);
+    }
   }
 
   // ═══ Opportunity Hunter ═══

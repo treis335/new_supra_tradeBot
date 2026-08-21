@@ -10,8 +10,9 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const { CONFIG } = require('../config/config');
-const { getProposal, setStatus } = require('./proposalQueue');
+const { getProposal, setStatus, listProposals } = require('./proposalQueue');
 const { scanCode } = require('./codeSafetyScanner');
+const { addComponent, removeComponent, KNOWN_HOOKS } = require('./componentRegistry');
 
 const OVERRIDES_FILE = path.join(__dirname, '..', 'data', 'live_overrides.json');
 const POOLS_FILE = path.join(__dirname, '..', 'spikeyPools.json');
@@ -162,11 +163,10 @@ function applyCodeChange(payload) {
 }
 
 // Tipos de proposta cuja mudança só faz efeito completo depois de o bot
-// reiniciar (hoje: nenhum -- config aplica-se logo em memória, código novo
-// fica isolado até outra proposta o ligar ao bot). Mantido como lista
-// explícita para quando isso deixar de ser verdade (ex: proposta que liga
-// um componente ao loop de trading).
-const TYPES_REQUIRING_RESTART = [];
+// reiniciar. wire_component/unwire_component mudam o comportamento real de
+// trading (ver loop/tick.js + componentRegistry.js), por isso o registo só
+// é lido de novo no arranque -- nunca a meio de um tick em curso.
+const TYPES_REQUIRING_RESTART = ['wire_component', 'unwire_component'];
 
 function requestRestart(reason) {
     const dir = path.dirname(RESTART_REQUEST_FILE);
@@ -219,9 +219,70 @@ function rollbackToPreviousChampion(lastApplied) {
             }
             return;
         }
+        case 'wire_component': {
+            removeComponent({ targetPath: rollbackInfo.targetPath, hookName: rollbackInfo.hookName });
+            return;
+        }
+        case 'unwire_component': {
+            // Reverter um "desligar" é voltar a ligar -- mas exige de novo
+            // que o ficheiro exista e passe no scan (nunca reativa às cegas).
+            const fullPath = path.join(PROJECT_ROOT, rollbackInfo.targetPath);
+            if (fs.existsSync(fullPath)) {
+                const scan = scanCode(fs.readFileSync(fullPath, 'utf8'));
+                if (scan.safe) {
+                    addComponent({ targetPath: rollbackInfo.targetPath, hookName: rollbackInfo.hookName, exportName: rollbackInfo.exportName, proposalId: null, description: 'restaurado por rollback' });
+                }
+            }
+            return;
+        }
         default:
             throw new Error(`rollback não suportado para o tipo '${type}'`);
     }
+}
+
+// 'wire_component' -- liga um componente já aprovado (code_change aplicado
+// anteriormente) a um ponto de extensão real do bot (ver
+// intelligence/componentRegistry.js e o hook em loop/tick.js). NUNCA edita
+// código -- só adiciona uma entrada a data/active_components.json. Exige
+// reiniciar para entrar em vigor (ver TYPES_REQUIRING_RESTART abaixo).
+function applyWireComponent(payload) {
+    const { targetPath, exportName, hookName } = payload || {};
+    if (!targetPath || !exportName || !hookName) {
+        throw new Error('proposta de ligação incompleta (falta targetPath, exportName ou hookName)');
+    }
+    if (!KNOWN_HOOKS.includes(hookName)) {
+        throw new Error(`hook "${hookName}" desconhecido -- só são permitidos: ${KNOWN_HOOKS.join(', ')}`);
+    }
+
+    // Exige que este ficheiro tenha mesmo passado por uma proposta
+    // code_change aprovada antes -- nunca liga um ficheiro que apareceu do
+    // nada (ex: alguém o criou à mão fora do fluxo de revisão).
+    const wasReviewed = listProposals('applied').some(p => p.type === 'code_change' && p.payload?.targetPath === targetPath);
+    if (!wasReviewed) {
+        throw new Error(`"${targetPath}" nunca passou por uma proposta code_change aprovada -- não pode ser ligado ao bot`);
+    }
+
+    // Re-verifica segurança do conteúdo ATUAL do ficheiro (defesa em
+    // profundidade -- pode ter sido editado à mão depois de aprovado).
+    const fullPath = path.join(PROJECT_ROOT, targetPath);
+    if (!fs.existsSync(fullPath)) throw new Error(`ficheiro "${targetPath}" já não existe`);
+    const currentCode = fs.readFileSync(fullPath, 'utf8');
+    const scan = scanCode(currentCode);
+    if (!scan.safe) throw new Error(`código atual do ficheiro está bloqueado pelo scan de segurança: ${scan.blocks.join('; ')}`);
+
+    const result = addComponent({ targetPath, exportName, hookName, proposalId: null, description: payload.description });
+    return { applied: result.added, reason: result.reason, rollbackInfo: { targetPath, hookName, wasWiredBefore: false } };
+}
+
+function applyUnwireComponent(payload) {
+    const { targetPath, hookName } = payload || {};
+    if (!targetPath || !hookName) throw new Error('falta targetPath ou hookName');
+    // Guarda o exportName do registo ANTES de remover, para o rollback saber
+    // com que nome voltar a ligar (removeComponent não devolve isto).
+    const { loadRegistry } = require('./componentRegistry');
+    const existing = loadRegistry().find(e => e.targetPath === targetPath && e.hookName === hookName);
+    const result = removeComponent({ targetPath, hookName });
+    return { applied: result.removed, rollbackInfo: { targetPath, hookName, exportName: existing?.exportName, wasWiredBefore: true } };
 }
 
 function applyProposal(id) {
@@ -237,6 +298,8 @@ function applyProposal(id) {
             case 'execute_trade': result = applyExecuteTrade(proposal.payload); break;
             case 'idea': result = applyIdea(proposal.payload); break;
             case 'code_change': result = applyCodeChange(proposal.payload); break;
+            case 'wire_component': result = applyWireComponent(proposal.payload); break;
+            case 'unwire_component': result = applyUnwireComponent(proposal.payload); break;
             default: throw new Error(`tipo de proposta desconhecido: ${proposal.type}`);
         }
         setStatus(id, 'applied', { result });

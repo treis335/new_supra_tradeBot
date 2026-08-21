@@ -181,6 +181,25 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Componentes: aprovados mas por ligar, e ativos -->
+            <div class="card wiring-card">
+                <div class="card-header">
+                    <span>🔌</span>
+                    <h2>Ligar Componentes ao Bot</h2>
+                </div>
+                <div class="card-body">
+                    <p class="codegen-hint">Componentes aprovados só influenciam o trading real depois de ligados a um ponto de extensão (hoje: ajuste de score). Ligar/desligar continua a pedir aprovação -- e exige reiniciar o bot para entrar em vigor.</p>
+                    <h4 class="wiring-subtitle">Por ligar</h4>
+                    <div id="availableComponentsList" class="wiring-list">
+                        <div class="proposal-empty">Nenhum componente aprovado à espera de ligação.</div>
+                    </div>
+                    <h4 class="wiring-subtitle">Ativos no bot</h4>
+                    <div id="activeComponentsList" class="wiring-list">
+                        <div class="proposal-empty">Nenhum componente ligado ainda.</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Footer -->

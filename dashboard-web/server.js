@@ -10,6 +10,8 @@ const { listProposals, getProposal, setStatus } = require('../intelligence/propo
 const { applyProposal, requestManualRestart } = require('../intelligence/proposalApplier');
 const { readRecentHistory } = require('../intelligence/historyLogger');
 const { generateComponent } = require('../intelligence/codeAgent');
+const { addProposal } = require('../intelligence/proposalQueue');
+const { loadRegistry } = require('../intelligence/componentRegistry');
 
 const app = express();
 const server = http.createServer(app);
@@ -250,6 +252,63 @@ app.post('/api/restart-bot', (req, res) => {
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
+});
+
+// Lista os componentes atualmente ligados ao bot real (ver
+// intelligence/componentRegistry.js). Só para leitura -- ligar/desligar
+// passa sempre por uma proposta (abaixo).
+app.get('/api/active-components', (req, res) => {
+    try {
+        res.json({ success: true, data: loadRegistry() });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Componentes que já passaram por uma proposta code_change aprovada mas
+// ainda não estão ligados a nenhum hook -- candidatos a "Ativar no bot".
+app.get('/api/available-components', (req, res) => {
+    try {
+        const applied = listProposals('applied').filter(p => p.type === 'code_change');
+        const active = loadRegistry();
+        const notWired = applied.filter(p => !active.some(a => a.targetPath === p.payload?.targetPath));
+        res.json({ success: true, data: notWired.map(p => ({ targetPath: p.payload.targetPath, explanation: p.payload.explanation, proposalId: p.id })) });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Propor ligar um componente já aprovado (code_change aplicado) a um ponto
+// de extensão real do bot. Cria uma proposta 'wire_component' -- passa
+// sempre pelo mesmo aprovar/rejeitar que tudo o resto, nunca ativa sozinho.
+app.post('/api/wire-component', (req, res) => {
+    const { targetPath, exportName, hookName, description } = req.body || {};
+    if (!targetPath || !exportName || !hookName) {
+        return res.status(400).json({ success: false, error: 'faltam targetPath, exportName ou hookName' });
+    }
+    const proposal = addProposal({
+        type: 'wire_component',
+        summary: `Ligar ${targetPath} (${exportName}) ao hook "${hookName}"`,
+        payload: { targetPath, exportName, hookName, description },
+        source: 'dashboard.wire-component',
+    });
+    broadcast({ type: 'proposal_created', data: proposal });
+    res.json({ success: true, data: proposal });
+});
+
+app.post('/api/unwire-component', (req, res) => {
+    const { targetPath, hookName } = req.body || {};
+    if (!targetPath || !hookName) {
+        return res.status(400).json({ success: false, error: 'faltam targetPath ou hookName' });
+    }
+    const proposal = addProposal({
+        type: 'unwire_component',
+        summary: `Desligar ${targetPath} do hook "${hookName}"`,
+        payload: { targetPath, hookName },
+        source: 'dashboard.unwire-component',
+    });
+    broadcast({ type: 'proposal_created', data: proposal });
+    res.json({ success: true, data: proposal });
 });
 
 // API: Comandos

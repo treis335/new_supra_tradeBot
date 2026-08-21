@@ -207,7 +207,7 @@ async function decideProposal(id, action) {
         const data = await res.json();
         if (data.success) {
             addConsoleLine(`${action === 'approve' ? '✅ Proposta aprovada e aplicada.' : '❌ Proposta rejeitada.'}`, 'system');
-            fetch(`${API_URL}/api/dashboard`).then(r => r.json()).then(d => { if (d.success) updateDashboard(d.data); });
+            fetchProposalsAndRender();
         } else {
             addConsoleLine(`❌ Erro: ${data.error}`, 'error');
         }
@@ -338,6 +338,91 @@ async function restartBot() {
     }
 }
 elements.restartBotBtn.addEventListener('click', restartBot);
+
+// ============================================
+// LIGAR COMPONENTES AO BOT
+// ============================================
+
+async function fetchAvailableComponents() {
+    try {
+        const res = await fetch(`${API_URL}/api/available-components`);
+        const data = await res.json();
+        if (!data.success) return;
+        const el = document.getElementById('availableComponentsList');
+        if (data.data.length === 0) {
+            el.innerHTML = '<div class="proposal-empty">Nenhum componente aprovado à espera de ligação.</div>';
+            return;
+        }
+        el.innerHTML = data.data.map(c => `
+            <div class="wiring-item">
+                <div class="proposal-target-path">📄 ${escapeHtml(c.targetPath)}</div>
+                ${c.explanation ? `<div class="proposal-explanation">${escapeHtml(c.explanation)}</div>` : ''}
+                <div class="wire-form">
+                    <input type="text" placeholder="nome da função exportada (ex: volatilityScore)" class="wire-export-input" data-path="${escapeHtml(c.targetPath)}">
+                    <select class="wire-hook-select">
+                        <option value="score_modifier">score_modifier (ajusta o score)</option>
+                    </select>
+                    <button class="approve-btn wire-btn" data-path="${escapeHtml(c.targetPath)}">🔌 Propor Ligação</button>
+                </div>
+            </div>
+        `).join('');
+        el.querySelectorAll('.wire-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const item = btn.closest('.wiring-item');
+                const exportName = item.querySelector('.wire-export-input').value.trim();
+                const hookName = item.querySelector('.wire-hook-select').value;
+                if (!exportName) { addConsoleLine('❌ Indica o nome da função exportada.', 'error'); return; }
+                const res = await fetch(`${API_URL}/api/wire-component`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ targetPath: btn.dataset.path, exportName, hookName }),
+                });
+                const data = await res.json();
+                addConsoleLine(data.success ? `📋 Proposta de ligação criada -- aprova acima.` : `❌ ${data.error}`, data.success ? 'system' : 'error');
+                if (data.success) { fetchProposalsAndRender(); }
+            });
+        });
+    } catch (e) { console.error('Erro ao buscar componentes disponíveis:', e); }
+}
+
+async function fetchActiveComponents() {
+    try {
+        const res = await fetch(`${API_URL}/api/active-components`);
+        const data = await res.json();
+        if (!data.success) return;
+        const el = document.getElementById('activeComponentsList');
+        if (data.data.length === 0) {
+            el.innerHTML = '<div class="proposal-empty">Nenhum componente ligado ainda.</div>';
+            return;
+        }
+        el.innerHTML = data.data.map(c => `
+            <div class="wiring-item">
+                <div class="proposal-target-path">🟢 ${escapeHtml(c.targetPath)} <span class="proposal-type">${escapeHtml(c.hookName)}</span></div>
+                <button class="reject-btn unwire-btn" data-path="${escapeHtml(c.targetPath)}" data-hook="${escapeHtml(c.hookName)}">🔌 Propor Desligar</button>
+            </div>
+        `).join('');
+        el.querySelectorAll('.unwire-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const res = await fetch(`${API_URL}/api/unwire-component`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ targetPath: btn.dataset.path, hookName: btn.dataset.hook }),
+                });
+                const data = await res.json();
+                addConsoleLine(data.success ? `📋 Proposta de desligar criada -- aprova acima.` : `❌ ${data.error}`, data.success ? 'system' : 'error');
+                if (data.success) { fetchProposalsAndRender(); }
+            });
+        });
+    } catch (e) { console.error('Erro ao buscar componentes ativos:', e); }
+}
+
+function fetchProposalsAndRender() {
+    fetch(`${API_URL}/api/dashboard`).then(r => r.json()).then(d => { if (d.success) updateDashboard(d.data); });
+    fetchAvailableComponents();
+    fetchActiveComponents();
+}
+
+// Carregar ao iniciar, e sempre que uma proposta for decidida.
+fetchAvailableComponents();
+fetchActiveComponents();
 
 // ============================================
 // INICIALIZAR
