@@ -321,6 +321,70 @@ body {
     font-size: 0.8rem;
 }
 
+/* ============================================
+   TEAM CARD (Equipa de Agentes)
+   ============================================ */
+.team-card {
+    grid-column: span 2;
+}
+
+.small-btn {
+    margin-left: auto;
+    padding: 5px 10px;
+    font-size: 0.75rem;
+}
+
+.team-roles {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.team-role {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+    padding: 10px;
+}
+
+.team-role-icon {
+    font-size: 1.3rem;
+}
+
+.team-role strong {
+    display: block;
+    font-size: 0.85rem;
+    margin-bottom: 2px;
+}
+
+.team-role-desc {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    line-height: 1.3;
+}
+
+.strategic-brief {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 12px;
+}
+
+.brief-summary {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.brief-priority {
+    background: rgba(217, 70, 239, 0.06);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-top: 8px;
+}
+
 .codegen-hint {
     font-size: 0.85rem;
     color: var(--text-secondary);

@@ -174,6 +174,14 @@ async function tick(boxes) {
       .catch((e) => logError('analyzePerformance', e));
   }
 
+  // O Estratega pensa no panorama geral, não em ajustes pontuais -- corre
+  // muito menos vezes que o Analista (a cada ~12h, não ~2h).
+  const STRATEGIST_EVERY_N_TICKS = Math.floor((12 * 3600 * 1000) / (CONFIG.pollingMs || 3000));
+  if (tickCounter % STRATEGIST_EVERY_N_TICKS === 0) {
+    require('../intelligence/strategist').generateStrategicBrief((msg) => require('../tui/systemLog').pushSystemLog(msg))
+      .catch((e) => logError('strategist', e));
+  }
+
   const tasks = [];
 
   for (const [dexKey, dex] of Object.entries(CONFIG.dexes)) {

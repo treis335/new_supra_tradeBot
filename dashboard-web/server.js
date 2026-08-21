@@ -254,6 +254,31 @@ app.post('/api/restart-bot', (req, res) => {
     }
 });
 
+// A "equipa" de agentes: Estratega (pensa), Analista (analisa), Programador
+// (constrói), Executor (age -- sempre determinístico, nunca IA). Isto é só
+// visibilidade -- nenhum destes endpoints muda o bot sozinho.
+app.get('/api/team-brief', (req, res) => {
+    try {
+        const { loadLatestBrief } = require('../intelligence/strategist');
+        res.json({ success: true, data: loadLatestBrief() });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/generate-brief', async (req, res) => {
+    try {
+        const { generateStrategicBrief } = require('../intelligence/strategist');
+        const result = await generateStrategicBrief();
+        if (result.error) return res.status(500).json({ success: false, error: result.error });
+        if (result.skipped) return res.status(400).json({ success: false, error: result.reason });
+        broadcast({ type: 'brief_updated', data: result.brief });
+        res.json({ success: true, data: result.brief });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 // Lista os componentes atualmente ligados ao bot real (ver
 // intelligence/componentRegistry.js). Só para leitura -- ligar/desligar
 // passa sempre por uma proposta (abaixo).

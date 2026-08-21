@@ -25,8 +25,33 @@ function loadCharter() {
 
 function withCharter(systemPrompt) {
     const charter = loadCharter();
-    if (!charter) return systemPrompt;
-    return `${charter}\n\n---\n\n${systemPrompt}`;
+    const brief = loadStrategicBriefSection();
+    const parts = [charter, brief, systemPrompt].filter(Boolean);
+    return parts.join('\n\n---\n\n');
+}
+
+// O briefing do Estratega (intelligence/strategist.js) é dinâmico -- muda a
+// cada ciclo, ao contrário do charter fixo. Só é incluído se existir e não
+// for demasiado antigo (>48h -- prioridades muito velhas podem já não fazer
+// sentido, melhor omitir do que confundir com dados desatualizados).
+const BRIEF_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+
+function loadStrategicBriefSection() {
+    try {
+        const briefPath = path.join(__dirname, '..', 'data', 'strategic_brief.json');
+        if (!fs.existsSync(briefPath)) return '';
+        const brief = JSON.parse(fs.readFileSync(briefPath, 'utf8'));
+        if (!brief.generatedAt || (Date.now() - brief.generatedAt) > BRIEF_MAX_AGE_MS) return '';
+
+        const prioridades = (brief.prioridades || [])
+            .map(p => `- ${p.foco} (para: ${p.paraQuem}) -- ${p.porque}`)
+            .join('\n');
+        if (!prioridades) return '';
+
+        return `## Prioridades atuais definidas pelo Estratega da equipa\n\n${brief.resumo}\n\n${prioridades}\n\nUsa isto para focar o teu raciocínio, mas não ignores dados novos que contradigam uma prioridade desatualizada.`;
+    } catch {
+        return '';
+    }
 }
 
 module.exports = { withCharter, loadCharter };

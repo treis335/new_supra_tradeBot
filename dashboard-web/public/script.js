@@ -425,6 +425,64 @@ fetchAvailableComponents();
 fetchActiveComponents();
 
 // ============================================
+// EQUIPA DE AGENTES -- briefing do Estratega
+// ============================================
+
+function renderBrief(brief) {
+    const el = document.getElementById('strategicBrief');
+    if (!brief) {
+        el.innerHTML = '<div class="proposal-empty">O Estratega ainda não gerou um briefing (corre automaticamente a cada ~12h, ou clica em "Atualizar Prioridades").</div>';
+        return;
+    }
+    const idade = brief.generatedAt ? new Date(brief.generatedAt).toLocaleString() : '';
+    const prioridadesHtml = (brief.prioridades || []).map(p => `
+        <div class="brief-priority">
+            <span class="proposal-type">${escapeHtml(p.paraQuem)}</span>
+            <strong>${escapeHtml(p.foco)}</strong>
+            <div class="proposal-explanation">${escapeHtml(p.porque)}</div>
+        </div>
+    `).join('');
+    el.innerHTML = `
+        <div class="brief-summary">${escapeHtml(brief.resumo || '')}</div>
+        <div class="thought-time">Gerado em ${idade}</div>
+        ${prioridadesHtml}
+    `;
+}
+
+async function fetchTeamBrief() {
+    try {
+        const res = await fetch(`${API_URL}/api/team-brief`);
+        const data = await res.json();
+        if (data.success) renderBrief(data.data);
+    } catch (e) { console.error('Erro ao buscar briefing:', e); }
+}
+
+document.getElementById('refreshBriefBtn')?.addEventListener('click', async (e) => {
+    const btn = e.target;
+    btn.disabled = true;
+    btn.textContent = 'A pensar...';
+    addConsoleLine('🧭 A pedir ao Estratega para atualizar as prioridades...', 'user');
+    try {
+        const res = await fetch(`${API_URL}/api/generate-brief`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            renderBrief(data.data);
+            fetchProposalsAndRender();
+            addConsoleLine('✅ Prioridades atualizadas.', 'system');
+        } else {
+            addConsoleLine(`❌ ${data.error}`, 'error');
+        }
+    } catch (e) {
+        addConsoleLine(`❌ Erro de comunicação: ${e.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🧭 Atualizar Prioridades';
+    }
+});
+
+fetchTeamBrief();
+
+// ============================================
 // INICIALIZAR
 // ============================================
 
