@@ -37,7 +37,8 @@ function loadMemory() {
       stats: data.stats || {},
     };
   } catch (e) {
-    console.error('[OpportunityMemory] JSON inválido — a recomeçar:', e.message);
+    try { require('../tui/systemLog').pushSystemLog(`{red-fg}⚠ OpportunityMemory: JSON inválido, a recomeçar: ${e.message}{/}`); }
+    catch { console.error('[OpportunityMemory] JSON inválido — a recomeçar:', e.message); }
     try {
       if (fs.existsSync(MEM_PATH)) {
         fs.renameSync(MEM_PATH, MEM_PATH + '.corrupt.' + Date.now());

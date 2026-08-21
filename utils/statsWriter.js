@@ -35,7 +35,8 @@ function writeBotStats({ walletBalances, opps, tickMs }) {
         fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
     } catch (e) {
         // Nunca deixar a escrita de stats derrubar o tick principal.
-        console.error('[statsWriter] falha ao gravar:', e.message);
+        try { require('../tui/systemLog').pushSystemLog(`{red-fg}⚠ statsWriter: falha ao gravar: ${e.message}{/}`); }
+        catch { console.error('[statsWriter] falha ao gravar:', e.message); }
     }
 }
 

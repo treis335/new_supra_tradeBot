@@ -37,7 +37,8 @@ function logEvent(type, data) {
         fs.appendFileSync(HISTORY_FILE, line);
     } catch (e) {
         // nunca deixar um erro de logging derrubar o bot
-        console.error('[historyLogger] falha ao gravar:', e.message);
+        try { require('../tui/systemLog').pushSystemLog(`{red-fg}⚠ historyLogger: falha ao gravar: ${e.message}{/}`); }
+        catch { console.error('[historyLogger] falha ao gravar:', e.message); }
     }
 }
 
@@ -59,7 +60,8 @@ function readRecentHistory({ maxEvents = 2000, sinceHoursAgo = 24 } = {}) {
         }
         return events.reverse();
     } catch (e) {
-        console.error('[historyLogger] falha ao ler:', e.message);
+        try { require('../tui/systemLog').pushSystemLog(`{red-fg}⚠ historyLogger: falha ao ler: ${e.message}{/}`); }
+        catch { console.error('[historyLogger] falha ao ler:', e.message); }
         return [];
     }
 }

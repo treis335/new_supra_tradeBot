@@ -33,6 +33,23 @@ function saveAll(list) {
 
 function addProposal({ type, summary, payload, source }) {
     const list = loadAll();
+
+    // Evita duplicados: se ja existir uma proposta PENDENTE do mesmo tipo com
+    // o mesmo payload (ex: "ajustar minProfitPct para 0.1" outra vez, sem a
+    // anterior ter sido decidida ainda), nao cria outra -- so devolve a
+    // existente. Isto era o que fazia o dashboard encher-se com a mesma
+    // sugestao repetida a cada vez que o analista corria.
+    const payloadKey = JSON.stringify(payload);
+    const existing = list.find(p =>
+        p.status === 'pending' && p.type === type && JSON.stringify(p.payload) === payloadKey
+    );
+    if (existing) {
+        require('../tui/systemLog').pushSystemLog(
+            `{grey-fg}🧠 Analista: sugestão igual à já pendente (${type}), não duplicada.{/}`
+        );
+        return existing;
+    }
+
     const proposal = {
         id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         ts: Date.now(),
@@ -45,7 +62,12 @@ function addProposal({ type, summary, payload, source }) {
     };
     list.push(proposal);
     saveAll(list);
-    console.log(`📋 [proposalQueue] Nova proposta pendente (${type}): ${summary}`);
+    // ANTES: console.log direto aqui corrompia o ecrã do blessed (a mesma
+    // classe de bug do discovery/ removido). Agora vai para o systemLog,
+    // que aparece no painel de log da TUI em vez de escrever por cima do ecrã.
+    try {
+        require('../tui/systemLog').pushSystemLog(`{cyan-fg}📋 Nova proposta (${type}): ${summary}{/}`);
+    } catch { /* tui/systemLog pode nao existir se isto correr fora da TUI (ex: dashboard standalone) */ }
     return proposal;
 }
 
