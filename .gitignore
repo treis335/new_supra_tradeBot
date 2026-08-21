@@ -22,3 +22,6 @@ npm-debug.log*
 .vscode/
 .idea/
 .DS_Store
+data/dashboard.log
+data/brain.log
+data/supervisor.log

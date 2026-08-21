@@ -72,15 +72,27 @@ function startSupervisor(log = console.log) {
     let rollbackAttemptedThisCycle = false;
 
     function spawnBot() {
+        // IMPORTANTE: stdio 'inherit' (nao 'pipe') para este processo especifico.
+        // O index.js usa blessed (interface visual em modo terminal), que precisa
+        // de acesso DIRETO a um terminal real (TTY) para desenhar corretamente --
+        // caixas, cores, posicionamento do cursor, etc. Com 'pipe' (usado antes),
+        // o stdout do processo filho deixa de ser um TTY (isTTY fica undefined),
+        // e os bytes de controlo do blessed ainda por cima ficavam com um prefixo
+        // "[BOT] " inserido a meio -- e' isto que causava o ecra corrompido/
+        // caixas sobrepostas. 'inherit' liga o filho diretamente ao terminal real
+        // que esta a correr o start-all.js, sem passar por um pipe intermedio.
+        //
+        // Contrapartida: perdemos o prefixo "[BOT] " e a captura de stdout/stderr
+        // deste processo especifico (porque 'inherit' e 'pipe' sao mutuamente
+        // exclusivos -- nao ha 'data' events com inherit). Os outros processos
+        // (dashboard, agente autonomo) continuam com 'pipe', pois nao tem TUI e
+        // beneficiam do prefixo para se distinguirem nos logs.
         botProcess = spawn('node', ['index.js'], {
-            stdio: 'pipe',
+            stdio: 'inherit',
             shell: true,
             env: { ...process.env, FORCE_COLOR: 'true' },
         });
         const startedAt = Date.now();
-
-        botProcess.stdout.on('data', d => process.stdout.write(`[BOT] ${d}`));
-        botProcess.stderr.on('data', d => process.stderr.write(`[BOT ERROR] ${d}`));
 
         botProcess.on('exit', (code, signal) => {
             const uptimeMs = Date.now() - startedAt;
