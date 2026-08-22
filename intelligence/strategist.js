@@ -18,9 +18,11 @@ const { readRecentHistory } = require('./historyLogger');
 const { listProposals, addProposal } = require('./proposalQueue');
 const { loadRegistry } = require('./componentRegistry');
 const { withCharter } = require('./agentCharter');
+const { generateComponent } = require('./codeAgent');
 const { logError } = require('../utils/logError');
 
 const BRIEF_FILE = path.join(__dirname, '..', 'data', 'strategic_brief.json');
+const DISPATCH_LOG_FILE = path.join(__dirname, '..', 'data', 'strategist_dispatch_log.json');
 
 let hunterMemory = null;
 try { hunterMemory = require('../hunter/opportunityMemory'); } catch { hunterMemory = null; }
@@ -141,6 +143,14 @@ async function generateStrategicBrief(log = console.log) {
         }
     }
 
+    // Prioridades para o Programador disparam automaticamente um pedido de
+    // componente -- ninguém precisa de escrever nada na caixa de texto. O
+    // Programador continua a passar pelo scan de segurança e o resultado
+    // fica sempre como proposta 'pending' -- isto só remove o "humano tem
+    // de pedir por palavras", nunca o "humano tem de aprovar antes de ir
+    // para produção".
+    await dispatchToProgrammer(brief.prioridades, log);
+
     log(`{magenta-fg}🧭 Estratega atualizou prioridades: ${brief.resumo}{/}`);
     return { brief };
 }
@@ -150,6 +160,68 @@ function loadLatestBrief() {
         if (!fs.existsSync(BRIEF_FILE)) return null;
         return JSON.parse(fs.readFileSync(BRIEF_FILE, 'utf8'));
     } catch { return null; }
+}
+
+// Máximo de pedidos automáticos ao Programador por briefing -- mesmo que o
+// Estratega devolva 4 prioridades para "programador", nunca dispara mais do
+// que isto de uma vez. É uma fila de propostas para reveres, não uma
+// enxurrada -- várias propostas simultâneas tornam a revisão pior, não melhor.
+const MAX_AUTO_DISPATCH_PER_CYCLE = 2;
+
+// Não repete o mesmo pedido ao Programador antes de passar este tempo,
+// mesmo que a prioridade continue a aparecer ciclo após ciclo (ex: porque
+// ainda ninguém reviu a proposta anterior). Registo próprio -- comparar
+// contra o resumo da proposta gerada não funciona, porque o Programador
+// escreve a sua própria explicação, não repete o "foco" original.
+const DISPATCH_COOLDOWN_MS = 3 * 24 * 60 * 60 * 1000; // 3 dias
+
+function loadDispatchLog() {
+    try {
+        if (!fs.existsSync(DISPATCH_LOG_FILE)) return [];
+        const data = JSON.parse(fs.readFileSync(DISPATCH_LOG_FILE, 'utf8'));
+        return Array.isArray(data) ? data : [];
+    } catch { return []; }
+}
+
+function saveDispatchLog(list) {
+    const dir = path.dirname(DISPATCH_LOG_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    // Mantém só entradas recentes -- este ficheiro é só para dedupe, não precisa de histórico longo.
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    fs.writeFileSync(DISPATCH_LOG_FILE, JSON.stringify(list.filter(e => e.dispatchedAt > cutoff), null, 2));
+}
+
+function normalizeFoco(foco) {
+    return String(foco).toLowerCase().trim();
+}
+
+async function dispatchToProgrammer(prioridades, log) {
+    const paraProgramador = prioridades.filter(p => p.paraQuem === 'programador' || p.paraQuem === 'ambos');
+    if (paraProgramador.length === 0) return;
+
+    const dispatchLog = loadDispatchLog();
+
+    let dispatched = 0;
+    for (const p of paraProgramador) {
+        if (dispatched >= MAX_AUTO_DISPATCH_PER_CYCLE) break;
+
+        const focoNorm = normalizeFoco(p.foco);
+        const jaPedidoRecentemente = dispatchLog.some(e => e.foco === focoNorm && (Date.now() - e.dispatchedAt) < DISPATCH_COOLDOWN_MS);
+        if (jaPedidoRecentemente) continue;
+
+        try {
+            const request = `${p.foco}. ${p.porque}`;
+            const result = await generateComponent(request, log);
+            if (result.proposal) {
+                log(`{cyan-fg}🧭→🛠️ Estratega pediu ao Programador: "${p.foco}" -- proposta criada, aguarda revisão.{/}`);
+                dispatched++;
+                dispatchLog.push({ foco: focoNorm, dispatchedAt: Date.now() });
+            }
+        } catch (e) {
+            logError('strategist.dispatchToProgrammer', e);
+        }
+    }
+    saveDispatchLog(dispatchLog);
 }
 
 module.exports = { generateStrategicBrief, loadLatestBrief };
