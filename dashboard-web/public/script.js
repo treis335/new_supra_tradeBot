@@ -59,7 +59,13 @@ function connectWebSocket() {
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                if (data.type === 'update') updateDashboard(data.data);
+                if (data.type === 'update') {
+                    updateDashboard(data.data);
+                    if (data.data.newTrades && data.data.newTrades.length > 0) {
+                        animateLiveTrades(data.data.newTrades);
+                    }
+                    pulseHeartbeat(data.data.botStats?.running);
+                }
             } catch (e) {
                 console.error('Erro ao processar mensagem:', e);
             }
@@ -93,6 +99,89 @@ function updateConnectionStatus(connected) {
         badge.innerHTML = '<span class="dot connected"></span> Conectado';
     } else {
         badge.innerHTML = '<span class="dot disconnected"></span> Desconectado';
+    }
+}
+
+// ============================================
+// ATIVIDADE AO VIVO -- animações reais disparadas por trades novas
+// ============================================
+
+// Mapeia o texto do "dex" que vem do histórico real (ex: "SPIKEY",
+// "DEXLYN", "CROSS-DEX (não-atómico)") para o nó/linhas do mapa SVG.
+function matchRouteKey(dexLabel) {
+    if (!dexLabel) return null;
+    const upper = dexLabel.toUpperCase();
+    if (upper.includes('CROSS')) return 'CROSS-DEX';
+    if (upper.includes('SPIKEY')) return 'SPIKEY';
+    if (upper.includes('DEXLYN')) return 'DEXLYN';
+    return null;
+}
+
+function pulseRoute(dexLabel, success) {
+    const key = matchRouteKey(dexLabel);
+    if (!key) return;
+    const svg = document.getElementById('routeMap');
+    if (!svg) return;
+
+    const statusClass = success ? '' : 'fail';
+    svg.querySelectorAll(`[data-route="${key}"]`).forEach(line => {
+        line.classList.remove('pulsing', 'fail');
+        void line.getBoundingClientRect(); // força reflow para a animação reiniciar mesmo em pulsos seguidos
+        line.classList.add('pulsing');
+        if (statusClass) line.classList.add(statusClass);
+        setTimeout(() => line.classList.remove('pulsing', 'fail'), 900);
+    });
+    const node = svg.querySelector(`[data-node="${key}"]`);
+    if (node) {
+        node.classList.remove('pulsing', 'fail');
+        void node.getBoundingClientRect();
+        node.classList.add('pulsing');
+        if (statusClass) node.classList.add(statusClass);
+        setTimeout(() => node.classList.remove('pulsing', 'fail'), 900);
+    }
+}
+
+const MAX_LIVE_FEED_ITEMS = 12;
+
+function animateLiveTrades(newTrades) {
+    const feed = document.getElementById('liveFeed');
+    if (!feed) return;
+    if (feed.querySelector('.proposal-empty')) feed.innerHTML = '';
+
+    // newTrades vem do servidor em ordem mais-recente-primeiro; queremos
+    // animar por ordem cronológica (mais antiga primeiro) para o efeito de
+    // entrada fazer sentido visualmente.
+    [...newTrades].reverse().forEach(t => {
+        const item = document.createElement('div');
+        item.className = `live-feed-item ${t.success ? 'success' : 'fail'}`;
+        item.innerHTML = `
+            <span class="live-feed-time">${escapeHtml(t.time || '')}</span>
+            <span>${t.success ? '✅' : '❌'} ${escapeHtml(t.dex || '')}</span>
+            ${t.profit ? `<span class="live-feed-profit ${t.success ? 'up' : 'down'}">${escapeHtml(t.profit)}</span>` : ''}
+        `;
+        feed.appendChild(item);
+        pulseRoute(t.dex, t.success);
+    });
+
+    while (feed.children.length > MAX_LIVE_FEED_ITEMS) {
+        feed.removeChild(feed.firstChild);
+    }
+    feed.scrollTop = feed.scrollHeight;
+
+    const statusEl = document.getElementById('liveStatus');
+    if (statusEl) statusEl.textContent = `${newTrades.length} nova(s) trade(s)`;
+}
+
+function pulseHeartbeat(running) {
+    const dot = document.getElementById('liveDot');
+    const statusEl = document.getElementById('liveStatus');
+    if (!dot) return;
+    if (running) {
+        dot.classList.add('active');
+        if (statusEl && statusEl.textContent === 'a aguardar bot...') statusEl.textContent = 'bot ativo';
+    } else {
+        dot.classList.remove('active');
+        if (statusEl) statusEl.textContent = 'bot desligado';
     }
 }
 

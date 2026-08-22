@@ -78,6 +78,38 @@
                 </div>
             </div>
 
+            <!-- Atividade Ao Vivo -->
+            <div class="card live-activity-card">
+                <div class="card-header">
+                    <span class="live-dot" id="liveDot"></span>
+                    <h2>Atividade Ao Vivo</h2>
+                    <span class="badge" id="liveStatus">a aguardar bot...</span>
+                </div>
+                <div class="card-body">
+                    <svg id="routeMap" viewBox="0 0 400 130" class="route-map">
+                        <line x1="70" y1="65" x2="200" y2="30" class="route-line" data-route="DEXLYN" />
+                        <line x1="70" y1="65" x2="200" y2="100" class="route-line" data-route="SPIKEY" />
+                        <line x1="200" y1="30" x2="330" y2="65" class="route-line" data-route="CROSS-DEX" />
+                        <line x1="200" y1="100" x2="330" y2="65" class="route-line" data-route="CROSS-DEX" />
+
+                        <circle cx="70" cy="65" r="22" class="route-node" />
+                        <text x="70" y="70" class="route-label">BOT</text>
+
+                        <circle cx="200" cy="30" r="20" class="route-node" data-node="DEXLYN" />
+                        <text x="200" y="35" class="route-label">Dexlyn</text>
+
+                        <circle cx="200" cy="100" r="20" class="route-node" data-node="SPIKEY" />
+                        <text x="200" y="105" class="route-label">Spikey</text>
+
+                        <circle cx="330" cy="65" r="20" class="route-node" data-node="CROSS-DEX" />
+                        <text x="330" y="70" class="route-label">Cross</text>
+                    </svg>
+                    <div id="liveFeed" class="live-feed">
+                        <div class="proposal-empty">Sem atividade ainda -- assim que o bot executar uma trade, aparece aqui em tempo real.</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Mercado -->
             <div class="card market-card">
                 <div class="card-header">

@@ -94,11 +94,14 @@ function loadRealMarketAndTrades() {
 
     const tradeEvents = events.filter(e => e.type === 'trade_executed').slice(-15).reverse();
     trades = tradeEvents.map(e => ({
+        ts: e.ts,
         time: new Date(e.ts).toTimeString().substring(0, 8),
         icon: '◆',
         color: e.success ? 'green' : 'red',
+        dex: e.dex || '?',
         text: `${e.dex || '?'} ${e.path || ''}`.trim(),
         profit: e.profitPct != null ? `${e.success ? '+' : ''}${e.profitPct.toFixed(3)}%` : '',
+        success: !!e.success,
     }));
 
     const snapshotEvents = events.filter(e => e.type === 'opportunity_snapshot').slice(-9);
@@ -122,11 +125,23 @@ function broadcast(data) {
     });
 }
 
+// Guarda o timestamp da trade mais recente já transmitida, para o frontend
+// conseguir distinguir "trades novas desde o último broadcast" (para animar
+// a entrada) de "a mesma lista redesenhada" (que não deve voltar a animar).
+// Inicializado ao momento de arranque do servidor -- trades históricas
+// (de antes do dashboard arrancar) nunca disparam animação de "ao vivo".
+let lastBroadcastTradeTs = Date.now();
+
 function updateAllData() {
     loadBotStats();
     loadBrainLogs();
     loadRealMarketAndTrades();
-    
+
+    const newTrades = trades.filter(t => (t.ts || 0) > lastBroadcastTradeTs);
+    if (trades.length > 0) {
+        lastBroadcastTradeTs = Math.max(lastBroadcastTradeTs, ...trades.map(t => t.ts || 0));
+    }
+
     const payload = {
         type: 'update',
         data: {
@@ -134,11 +149,12 @@ function updateAllData() {
             brainLogs: brainLogs.slice(-5),
             marketData,
             trades,
+            newTrades, // só as que apareceram desde o último ciclo -- para animação ao vivo
             pendingProposals: listProposals('pending'),
             timestamp: new Date().toISOString()
         }
     };
-    
+
     broadcast(payload);
 }
 
