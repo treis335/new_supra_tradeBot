@@ -5,6 +5,7 @@ const priceEngineV3 = require('../dexes/dexlyn/dexlynEngineV3');
 const spikeyEngine = require('../dexes/spikey/spikeyEngine');
 const { SPIKEY_CONFIG } = require('../dexes/spikey/spikeyConfig');
 const { discoverNewPools } = require('../dexes/spikey/spikeyDiscovery');
+const chainPulse = require('../tracker/chainPulse');
 const { logEvent, readRecentHistory } = require('../intelligence/historyLogger');
 const { applyScoreModifiers } = require('../intelligence/componentRegistry');
 const { analyzePerformance } = require('../intelligence/deepseekAnalyst');
@@ -115,7 +116,7 @@ async function maybeAutoExecute(opps, balances, boxes) {
     );
 
     try {
-      const res = await executor.execute(opp, () => {});
+      const res = await executor.execute(opp, () => { });
       if (res && res.txHash) {
         log(`{green-fg}✅ Sucesso! Tx: ${res.txHash.slice(0, 10)}...{/}`);
         availableSUPRA -= opp.optimalAmount;
@@ -293,6 +294,28 @@ async function tick(boxes) {
     currentOpps = [];
   }
 
+  // ═══ Chain Pulse — bot "vivo" mesmo sem arb ═══
+  if (tickCounter % 2 === 0) { // a cada 2 ticks (~6s com pollingMs=3000)
+    chainPulse.pulseOnce({ count: 6 }).then(({ newCount }) => {
+      if (newCount > 0) {
+        try {
+          const lines = chainPulse.getDisplayLines(8);
+          // systemLog se existir; senão footer
+          try {
+            const { pushSystemLog } = require('../tui/systemLog');
+            lines.slice(0, 3).forEach((l) => pushSystemLog(l));
+          } catch {
+            if (boxes?.footerBox) {
+              boxes.footerBox.setContent(
+                `{grey-fg}⛓ chain{/} ${lines[0] || 'a escutar...'}`
+              );
+            }
+          }
+        } catch { }
+      }
+    }).catch(() => { });
+  }
+
   // ═══ Componentes aprovados e ligados (intelligence/componentRegistry.js) ═══
   // Único ponto de extensão onde código gerado por IA e aprovado pelo humano
   // pode influenciar o trading real -- nunca edita este ficheiro, só ajusta
@@ -351,10 +374,15 @@ async function tick(boxes) {
 
   const STATS_EVERY_N_TICKS = Math.max(1, Math.floor(10000 / (CONFIG.pollingMs || 3000)));
   if (tickCounter % STATS_EVERY_N_TICKS === 0) {
-    writeBotStats({ walletBalances, opps, tickMs: Date.now() - t0 });
+    writeBotStats({
+      walletBalances,
+      opps,
+      tickMs: Date.now() - t0,
+      chainPulse: require('../tracker/chainPulse').getDashboardFeed(20),
+    });
   }
 
-  try { boxes.screen.render(); } catch {}
+  try { boxes.screen.render(); } catch { }
 }
 
 function getBestOpportunity() {

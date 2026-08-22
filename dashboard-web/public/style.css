@@ -519,6 +519,71 @@ body {
     margin-bottom: 10px;
 }
 
+/* ── Chain Pulse ── */
+.chain-pulse-card .card-body {
+    padding-top: 4px;
+}
+
+.chain-pulse-feed {
+    max-height: 280px;
+    overflow-y: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.chain-pulse-item {
+    display: grid;
+    grid-template-columns: 64px 72px 88px 1fr;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    animation: chainPulseIn 0.35s ease;
+}
+
+.chain-pulse-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.cp-time {
+    color: #8b93a7;
+}
+
+.cp-dex {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+}
+
+.cp-hash {
+    color: #5ddea6;
+    letter-spacing: 0.02em;
+}
+
+.cp-hint {
+    color: #9aa3b5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chain-pulse-item.dex-dexlyn .cp-dex { color: #5eb8ff; }
+.chain-pulse-item.dex-spikey .cp-dex { color: #d48cff; }
+.chain-pulse-item.dex-wallet .cp-dex { color: #ffd166; }
+.chain-pulse-item.dex-other .cp-dex { color: #a0a8b8; }
+
+@keyframes chainPulseIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 /* ============================================
    BRAIN CARD
    ============================================ */

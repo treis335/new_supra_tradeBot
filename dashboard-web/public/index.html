@@ -110,6 +110,23 @@
                 </div>
             </div>
 
+             <!-- Chain ao vivo (txids on-chain, mesmo sem arb) -->
+            <div class="card chain-pulse-card">
+                <div class="card-header">
+                    <span class="live-dot" id="chainPulseDot"></span>
+                    <h2>⛓ Chain ao vivo</h2>
+                    <span class="badge" id="chainPulseStatus">a escutar...</span>
+                </div>
+                <div class="card-body">
+                    <p class="codegen-hint" style="margin-bottom:8px;">
+                        Txs recentes observadas na Supra (Dexlyn / Spikey / Wallet). Não precisa de haver arb.
+                    </p>
+                    <div id="chainPulseFeed" class="chain-pulse-feed">
+                        <div class="proposal-empty">Sem txs ainda — o bot grava o pulso em .bot_stats.json a cada ~10s.</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Mercado -->
             <div class="card market-card">
                 <div class="card-header">

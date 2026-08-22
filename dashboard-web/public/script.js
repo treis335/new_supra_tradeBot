@@ -65,6 +65,7 @@ function connectWebSocket() {
                         animateLiveTrades(data.data.newTrades);
                     }
                     pulseHeartbeat(data.data.botStats?.running);
+                    updateChainPulse(data.data.botStats); 
                 }
             } catch (e) {
                 console.error('Erro ao processar mensagem:', e);
@@ -105,6 +106,72 @@ function updateConnectionStatus(connected) {
 // ============================================
 // ATIVIDADE AO VIVO -- animações reais disparadas por trades novas
 // ============================================
+
+// ============================================
+// CHAIN PULSE — txids on-chain (bot "vivo")
+// ============================================
+
+const MAX_CHAIN_PULSE_ITEMS = 20;
+let lastChainPulseTs = 0;
+
+function updateChainPulse(botStats) {
+    const feed = document.getElementById('chainPulseFeed');
+    const statusEl = document.getElementById('chainPulseStatus');
+    const dot = document.getElementById('chainPulseDot');
+    if (!feed) return;
+
+    const list = botStats?.chainPulse;
+    if (!Array.isArray(list) || list.length === 0) {
+        if (!feed.querySelector('.chain-pulse-item')) {
+            feed.innerHTML =
+                '<div class="proposal-empty">Sem txs ainda — confirma chainPulse.js + statsWriter.</div>';
+        }
+        if (statusEl) statusEl.textContent = botStats?.running ? 'à espera de txs...' : 'bot desligado';
+        if (dot) dot.classList.toggle('active', !!botStats?.running);
+        return;
+    }
+
+    if (dot) dot.classList.toggle('active', !!botStats?.running);
+    if (statusEl) {
+        statusEl.textContent = botStats?.running
+            ? `${list.length} txs em memória`
+            : 'bot desligado';
+    }
+
+    // Só re-render se houver algo novo (evita flicker a cada 3s)
+    const newest = list[0]?.ts || 0;
+    if (newest && newest <= lastChainPulseTs && feed.querySelector('.chain-pulse-item')) {
+        return;
+    }
+    lastChainPulseTs = newest || Date.now();
+
+    feed.innerHTML = list
+        .slice(0, MAX_CHAIN_PULSE_ITEMS)
+        .map((e) => {
+            const dex = escapeHtml(e.dex || e.label || '?');
+            const short = escapeHtml(e.short || e.shortHash || '--------');
+            const hint = escapeHtml(e.hint || 'tx');
+            const time = escapeHtml(e.time || '');
+            const full = e.txid ? escapeHtml(e.txid) : '';
+            const cls =
+                dex.toUpperCase().includes('SPIKEY')
+                    ? 'dex-spikey'
+                    : dex.toUpperCase().includes('DEXLYN')
+                      ? 'dex-dexlyn'
+                      : dex.toUpperCase().includes('WALLET')
+                        ? 'dex-wallet'
+                        : 'dex-other';
+            return `
+                <div class="chain-pulse-item ${cls}" title="${full}">
+                    <span class="cp-time">${time}</span>
+                    <span class="cp-dex">${dex}</span>
+                    <span class="cp-hash">${short}</span>
+                    <span class="cp-hint">${hint}</span>
+                </div>`;
+        })
+        .join('');
+}
+
 
 // Mapeia o texto do "dex" que vem do histórico real (ex: "SPIKEY",
 // "DEXLYN", "CROSS-DEX (não-atómico)") para o nó/linhas do mapa SVG.
@@ -250,6 +317,8 @@ function updateDashboard(data) {
         }
         elements.tradesCount.textContent = `${data.trades.length} trades`;
     }
+
+    updateChainPulse(data.botStats);
 }
 
 function renderProposals(proposals) {
